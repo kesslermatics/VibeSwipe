@@ -232,7 +232,7 @@ async def get_playlist_tracks(
 
     songs: list[str] = []
     url = f"{SPOTIFY_API_BASE}/playlists/{resolved_id}/items"
-    params: dict = {"limit": 50, "fields": "next,items(track(name,artists(name)))"}
+    params: dict = {"limit": 50}
 
     async with httpx.AsyncClient() as client:
         while url:
@@ -463,7 +463,7 @@ async def debug_token_info(
                 # Test getting tracks from the first playlist (using /items, not deprecated /tracks)
                 pid = items[0]["id"]
                 r2 = await client.get(
-                    f"https://api.spotify.com/v1/playlists/{pid}/items?limit=1&fields=next,items(track(name,artists(name)))",
+                    f"https://api.spotify.com/v1/playlists/{pid}/items?limit=1",
                     headers={"Authorization": f"Bearer {spotify_token}"},
                 )
                 results["playlist_items_status"] = r2.status_code
@@ -525,7 +525,7 @@ async def debug_test_playlist(
     async with httpx.AsyncClient() as client:
         # Test /playlists/{id}/items (new endpoint)
         r1 = await client.get(
-            f"https://api.spotify.com/v1/playlists/{playlist_id}/items?limit=2&fields=next,items(track(name,artists(name)))",
+            f"https://api.spotify.com/v1/playlists/{playlist_id}/items?limit=2",
             headers={"Authorization": f"Bearer {spotify_token}"},
         )
         results["items_status"] = r1.status_code
