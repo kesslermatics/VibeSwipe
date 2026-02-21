@@ -1,4 +1,4 @@
-# 🎵 VibeSwipe
+# 🎵 SpotiVibe
 
 A fullstack web application for discovering music through a swipe-based interface, powered by Spotify.
 
