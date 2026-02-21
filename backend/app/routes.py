@@ -422,6 +422,7 @@ def health_check():
 # ── Debug: Check Spotify token scopes (TEMPORARY - NO AUTH) ──
 @router.get("/debug/token-info")
 async def debug_token_info(
+    force_refresh: bool = False,
     db: Session = Depends(get_db),
 ):
     """TEMPORARY debug endpoint - no auth required."""
@@ -430,10 +431,13 @@ async def debug_token_info(
     if not current_user:
         return {"error": "No users in DB"}
 
-    spotify_token = await get_valid_spotify_token(current_user, db)
-
-    # Test each relevant endpoint
-    results: dict = {"user": current_user.spotify_id}
+    # Force a token refresh if requested
+    if force_refresh:
+        spotify_token = await refresh_spotify_token(current_user, db)
+        results: dict = {"user": current_user.spotify_id, "forced_refresh": True}
+    else:
+        spotify_token = await get_valid_spotify_token(current_user, db)
+        results = {"user": current_user.spotify_id, "forced_refresh": False}
     async with httpx.AsyncClient() as client:
         # Test /me
         r = await client.get(
