@@ -228,7 +228,7 @@ async def get_playlist_tracks(
 
     songs: list[str] = []
     url = f"{SPOTIFY_API_BASE}/playlists/{resolved_id}/tracks"
-    params: dict = {"fields": "items(track(name,artists(name))),next", "limit": 100}
+    params: dict = {"limit": 100}
 
     async with httpx.AsyncClient() as client:
         while url:
@@ -246,7 +246,10 @@ async def get_playlist_tracks(
                     headers={"Authorization": f"Bearer {spotify_token}"},
                 )
             if resp.status_code != 200:
-                raise HTTPException(status_code=resp.status_code, detail="Playlist konnte nicht geladen werden.")
+                raise HTTPException(
+                    status_code=resp.status_code,
+                    detail=f"Playlist konnte nicht geladen werden: {resp.text[:200]}",
+                )
 
             data = resp.json()
             for item in data.get("items", []):
