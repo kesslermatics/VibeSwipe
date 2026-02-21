@@ -502,3 +502,47 @@ async def debug_token_info(
             results["playlists_error"] = r.text[:300]
 
     return results
+
+
+# ── Debug: Test specific playlist (TEMPORARY) ──
+@router.get("/debug/test-playlist")
+async def debug_test_playlist(
+    playlist_id: str = "37i9dQZF1DXcBWIGoYBM5M",
+    db: Session = Depends(get_db),
+):
+    """Test a specific playlist. Default: Today's Top Hits (public)."""
+    current_user = db.query(User).first()
+    if not current_user:
+        return {"error": "No users in DB"}
+
+    spotify_token = await refresh_spotify_token(current_user, db)
+
+    results: dict = {"playlist_id": playlist_id}
+    async with httpx.AsyncClient() as client:
+        # Test /playlists/{id}/tracks
+        r1 = await client.get(
+            f"https://api.spotify.com/v1/playlists/{playlist_id}/tracks?limit=2",
+            headers={"Authorization": f"Bearer {spotify_token}"},
+        )
+        results["tracks_status"] = r1.status_code
+        if r1.status_code == 200:
+            data = r1.json()
+            results["tracks_total"] = data.get("total")
+            items = data.get("items", [])
+            if items:
+                t = items[0].get("track", {})
+                results["first_track"] = t.get("name", "?") if t else "none"
+        else:
+            results["tracks_error"] = r1.text[:300]
+
+        # Also get token info to check scopes
+        r2 = await client.get(
+            "https://api.spotify.com/v1/me",
+            headers={"Authorization": f"Bearer {spotify_token}"},
+        )
+        if r2.status_code == 200:
+            me_data = r2.json()
+            results["user_product"] = me_data.get("product", "unknown")
+            results["user_country"] = me_data.get("country", "unknown")
+
+    return results
