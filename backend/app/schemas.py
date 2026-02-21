@@ -27,6 +27,7 @@ class MessageResponse(BaseModel):
 # ── Discover ──────────────────────────────────────────
 class DiscoverRequest(BaseModel):
     prompt: str
+    context_songs: list[str] = []  # e.g. ["Song - Artist", ...] from a playlist
 
 
 class SongResult(BaseModel):

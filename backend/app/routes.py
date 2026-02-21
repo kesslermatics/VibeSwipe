@@ -148,7 +148,11 @@ async def discover(
         )
 
     try:
-        result = await discover_songs(payload.prompt, current_user.spotify_access_token)
+        result = await discover_songs(
+            payload.prompt,
+            current_user.spotify_access_token,
+            context_songs=payload.context_songs or None,
+        )
         return result
     except Exception as e:
         raise HTTPException(
@@ -157,8 +161,51 @@ async def discover(
         )
 
 
-# ── Create Spotify playlist from liked songs ─────────
+# ── Fetch tracks from a Spotify playlist ─────────────
 SPOTIFY_API_BASE = "https://api.spotify.com/v1"
+
+
+@router.get("/playlist-tracks")
+async def get_playlist_tracks(
+    playlist_url: str,
+    current_user: User = Depends(get_current_user),
+):
+    """Extract track names from a Spotify playlist URL/ID."""
+    if not current_user.spotify_access_token:
+        raise HTTPException(status_code=400, detail="No Spotify token.")
+
+    # Extract playlist ID from various URL formats
+    playlist_id = playlist_url.strip()
+    if "spotify.com/playlist/" in playlist_id:
+        playlist_id = playlist_id.split("playlist/")[1].split("?")[0].split("/")[0]
+    elif "spotify:playlist:" in playlist_id:
+        playlist_id = playlist_id.split(":")[-1]
+
+    songs: list[str] = []
+    url = f"{SPOTIFY_API_BASE}/playlists/{playlist_id}/tracks"
+    params = {"fields": "items(track(name,artists(name))),next", "limit": 100}
+
+    async with httpx.AsyncClient() as client:
+        while url:
+            resp = await client.get(
+                url,
+                params=params,
+                headers={"Authorization": f"Bearer {current_user.spotify_access_token}"},
+            )
+            if resp.status_code != 200:
+                raise HTTPException(status_code=resp.status_code, detail="Playlist konnte nicht geladen werden.")
+
+            data = resp.json()
+            for item in data.get("items", []):
+                track = item.get("track")
+                if track and track.get("name"):
+                    artist = ", ".join(a["name"] for a in track.get("artists", []))
+                    songs.append(f"{track['name']} - {artist}")
+
+            url = data.get("next")
+            params = {}  # next URL already includes params
+
+    return {"songs": songs, "total": len(songs)}
 
 
 @router.post("/create-playlist", response_model=CreatePlaylistResponse)

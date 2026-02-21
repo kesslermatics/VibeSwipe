@@ -1,4 +1,5 @@
 import json
+import asyncio
 import httpx
 from app.config import get_settings
 
@@ -13,7 +14,7 @@ SPOTIFY_SEARCH_URL = "https://api.spotify.com/v1/search"
 
 SYSTEM_PROMPT = """You are a music recommendation expert. The user will describe a mood, vibe, activity, or specific song preferences.
 
-Your job is to recommend exactly 30 songs that perfectly match their request.
+Your job is to recommend exactly 50 songs that perfectly match their request.
 
 Respond ONLY with valid JSON in this exact format, nothing else:
 {
@@ -25,26 +26,35 @@ Respond ONLY with valid JSON in this exact format, nothing else:
 }
 
 Rules:
-- Always recommend exactly 30 songs
+- Always recommend exactly 50 songs
 - Mix well-known and lesser-known tracks
 - Consider the language/culture of the request (e.g. German input → include some German/European artists)
 - Only output valid JSON, no markdown, no explanation"""
 
 
-async def ask_gemini(prompt: str) -> dict:
+async def ask_gemini(prompt: str, context_songs: list[str] | None = None) -> dict:
     """Ask Gemini to interpret the mood and suggest songs."""
+    parts = [{"text": SYSTEM_PROMPT}]
+
+    # If the user provided a playlist as context, include it
+    if context_songs:
+        song_list = "\n".join(f"- {s}" for s in context_songs)
+        parts.append({
+            "text": (
+                f"The user has a playlist with these songs as reference:\n{song_list}\n\n"
+                "Use this playlist as inspiration for the style/mood/genre. "
+                "Recommend songs that fit the same vibe but DO NOT include any of these songs in your recommendations. "
+                "Avoid duplicates completely."
+            )
+        })
+
+    parts.append({"text": f"User request: {prompt}"})
+
     payload = {
-        "contents": [
-            {
-                "parts": [
-                    {"text": SYSTEM_PROMPT},
-                    {"text": f"User request: {prompt}"},
-                ]
-            }
-        ],
+        "contents": [{"parts": parts}],
         "generationConfig": {
             "temperature": 2.0,
-            "maxOutputTokens": 4096,
+            "maxOutputTokens": 8192,
         },
     }
 
@@ -97,28 +107,29 @@ async def search_spotify(query: str, spotify_token: str) -> dict | None:
     }
 
 
-async def discover_songs(prompt: str, spotify_token: str) -> dict:
-    """Full pipeline: Gemini interprets mood → Spotify searches for each song."""
-    gemini_result = await ask_gemini(prompt)
+async def discover_songs(prompt: str, spotify_token: str, context_songs: list[str] | None = None) -> dict:
+    """Full pipeline: Gemini interprets mood → Spotify searches for each song (parallel)."""
+    gemini_result = await ask_gemini(prompt, context_songs)
 
-    songs = []
-    for song in gemini_result.get("songs", []):
+    async def fetch_song(song: dict) -> dict:
         query = f"{song['title']} {song['artist']}"
         spotify_data = await search_spotify(query, spotify_token)
         if spotify_data:
-            songs.append(spotify_data)
-        else:
-            # Fallback: include Gemini suggestion without Spotify data
-            songs.append({
-                "title": song["title"],
-                "artist": song["artist"],
-                "spotify_url": None,
-                "album_image": None,
-                "preview_url": None,
-                "spotify_uri": None,
-            })
+            return spotify_data
+        return {
+            "title": song["title"],
+            "artist": song["artist"],
+            "spotify_url": None,
+            "album_image": None,
+            "preview_url": None,
+            "spotify_uri": None,
+        }
+
+    songs = await asyncio.gather(
+        *(fetch_song(song) for song in gemini_result.get("songs", []))
+    )
 
     return {
         "mood_summary": gemini_result.get("mood_summary", ""),
-        "songs": songs,
+        "songs": list(songs),
     }

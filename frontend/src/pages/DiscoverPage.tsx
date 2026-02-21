@@ -21,6 +21,11 @@ interface SaveResult {
     already_saved: number;
 }
 
+interface PlaylistTracksResult {
+    songs: string[];
+    total: number;
+}
+
 function extractTrackId(uri: string | null): string | null {
     if (!uri) return null;
     const parts = uri.split(":");
@@ -35,13 +40,52 @@ export default function DiscoverPage() {
     const [result, setResult] = useState<DiscoverResult | null>(null);
     const [error, setError] = useState("");
 
+    // Per-song saved state
     const [savedSongs, setSavedSongs] = useState<Set<number>>(new Set());
     const [savingIdx, setSavingIdx] = useState<number | null>(null);
+
+    // Save all
     const [savingAll, setSavingAll] = useState(false);
     const [saveAllResult, setSaveAllResult] = useState<SaveResult | null>(null);
 
-    // Which song embed is expanded (-1 = none)
+    // Spotify Embed player
     const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
+
+    // Playlist context
+    const [showPlaylistInput, setShowPlaylistInput] = useState(false);
+    const [playlistUrl, setPlaylistUrl] = useState("");
+    const [contextSongs, setContextSongs] = useState<string[]>([]);
+    const [loadingPlaylist, setLoadingPlaylist] = useState(false);
+    const [playlistLoaded, setPlaylistLoaded] = useState(false);
+
+    const toggleEmbed = (idx: number) => {
+        setExpandedIdx(expandedIdx === idx ? null : idx);
+    };
+
+    const loadPlaylistContext = async () => {
+        if (!playlistUrl.trim()) return;
+        setLoadingPlaylist(true);
+        setError("");
+        try {
+            const data = await api<PlaylistTracksResult>(
+                `/playlist-tracks?url=${encodeURIComponent(playlistUrl.trim())}`,
+                { method: "GET", token: token || "" }
+            );
+            setContextSongs(data.songs);
+            setPlaylistLoaded(true);
+        } catch (err: unknown) {
+            setError(err instanceof Error ? err.message : "Playlist konnte nicht geladen werden");
+        } finally {
+            setLoadingPlaylist(false);
+        }
+    };
+
+    const clearPlaylistContext = () => {
+        setContextSongs([]);
+        setPlaylistLoaded(false);
+        setPlaylistUrl("");
+        setShowPlaylistInput(false);
+    };
 
     const handleDiscover = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -57,7 +101,10 @@ export default function DiscoverPage() {
         try {
             const data = await api<DiscoverResult>("/discover", {
                 method: "POST",
-                body: { prompt: prompt.trim() },
+                body: {
+                    prompt: prompt.trim(),
+                    context_songs: contextSongs,
+                },
                 token: token || "",
             });
             setResult(data);
@@ -66,10 +113,6 @@ export default function DiscoverPage() {
         } finally {
             setLoading(false);
         }
-    };
-
-    const toggleEmbed = (idx: number) => {
-        setExpandedIdx(expandedIdx === idx ? null : idx);
     };
 
     const saveSingleSong = async (idx: number) => {
@@ -98,6 +141,7 @@ export default function DiscoverPage() {
         const trackIds = result.songs
             .map((s) => extractTrackId(s.spotify_uri))
             .filter((id): id is string => !!id);
+
         if (trackIds.length === 0) return;
 
         setSavingAll(true);
@@ -109,6 +153,7 @@ export default function DiscoverPage() {
                 token: token || "",
             });
             setSaveAllResult(data);
+            // Mark all as saved
             const allIdx = new Set<number>();
             result.songs.forEach((_, i) => allIdx.add(i));
             setSavedSongs(allIdx);
@@ -146,10 +191,84 @@ export default function DiscoverPage() {
                         <textarea
                             value={prompt}
                             onChange={(e) => setPrompt(e.target.value)}
-                            placeholder='z.B. "Chill Lo-Fi zum Lernen", "Party Songs wie bei Tomorrowland", "Melancholische Indie Songs für einen Regentag"...'
+                            placeholder={
+                                playlistLoaded
+                                    ? `Playlist mit ${contextSongs.length} Songs als Inspiration geladen! Beschreibe, was du entdecken willst…`
+                                    : 'z.B. "Chill Lo-Fi zum Lernen", "Party Songs wie bei Tomorrowland", "Melancholische Indie Songs für einen Regentag"...'
+                            }
                             rows={3}
                             className="w-full resize-none bg-transparent text-sm text-gray-100 placeholder-gray-500 outline-none"
                         />
+
+                        {/* Playlist context section */}
+                        <div className="mt-3 border-t border-white/5 pt-3">
+                            {!showPlaylistInput && !playlistLoaded && (
+                                <button
+                                    type="button"
+                                    onClick={() => setShowPlaylistInput(true)}
+                                    className="flex items-center gap-2 text-xs text-gray-500 transition hover:text-purple-400"
+                                >
+                                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
+                                    </svg>
+                                    Playlist als Inspiration hinzufügen
+                                </button>
+                            )}
+
+                            {showPlaylistInput && !playlistLoaded && (
+                                <div className="flex items-center gap-2">
+                                    <input
+                                        type="text"
+                                        value={playlistUrl}
+                                        onChange={(e) => setPlaylistUrl(e.target.value)}
+                                        placeholder="Spotify Playlist URL einfügen…"
+                                        className="flex-1 rounded-lg bg-white/5 px-3 py-2 text-xs text-gray-100 placeholder-gray-500 outline-none ring-1 ring-white/10 focus:ring-purple-500/50"
+                                    />
+                                    <button
+                                        type="button"
+                                        onClick={loadPlaylistContext}
+                                        disabled={loadingPlaylist || !playlistUrl.trim()}
+                                        className="flex items-center gap-1.5 rounded-lg bg-purple-500 px-3 py-2 text-xs font-semibold text-white transition hover:bg-purple-400 disabled:opacity-50"
+                                    >
+                                        {loadingPlaylist ? (
+                                            <div className="h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                                        ) : (
+                                            "Laden"
+                                        )}
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => { setShowPlaylistInput(false); setPlaylistUrl(""); }}
+                                        className="rounded-lg p-2 text-gray-500 transition hover:text-gray-300"
+                                    >
+                                        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                                        </svg>
+                                    </button>
+                                </div>
+                            )}
+
+                            {playlistLoaded && (
+                                <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-2">
+                                        <span className="inline-flex items-center gap-1 rounded-full bg-purple-500/20 px-2.5 py-1 text-xs font-medium text-purple-400 ring-1 ring-purple-500/30">
+                                            <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                                <path strokeLinecap="round" strokeLinejoin="round" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
+                                            </svg>
+                                            {contextSongs.length} Songs als Kontext
+                                        </span>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={clearPlaylistContext}
+                                        className="text-xs text-gray-500 transition hover:text-red-400"
+                                    >
+                                        Entfernen
+                                    </button>
+                                </div>
+                            )}
+                        </div>
+
                         <div className="mt-3 flex items-center justify-between">
                             <p className="text-xs text-gray-500">Powered by Gemini AI + Spotify</p>
                             <button
@@ -220,13 +339,11 @@ export default function DiscoverPage() {
                                 return (
                                     <div
                                         key={i}
-                                        className={`overflow-hidden rounded-xl transition-all ${
-                                            isSaved
-                                                ? "bg-green-500/10 ring-1 ring-green-500/30"
-                                                : "glass-light hover:ring-1 hover:ring-white/10"
-                                        }`}
+                                        className={`overflow-hidden rounded-xl transition-all ${isSaved
+                                            ? "bg-green-500/10 ring-1 ring-green-500/30"
+                                            : "glass-light hover:ring-1 hover:ring-white/10"
+                                            }`}
                                     >
-                                        {/* Song row */}
                                         <div className="flex items-center gap-3 p-3">
                                             {/* Album Art – click to toggle embed */}
                                             <button
@@ -244,7 +361,7 @@ export default function DiscoverPage() {
                                                     <div className={`absolute inset-0 flex items-center justify-center transition ${isExpanded ? "bg-black/50" : "bg-black/0 group-hover:bg-black/40"}`}>
                                                         <div className={`transition ${isExpanded ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}>
                                                             {isExpanded ? (
-                                                                <svg className="h-5 w-5 text-green-400 drop-shadow" fill="currentColor" viewBox="0 0 24 24">
+                                                                <svg className="h-5 w-5 text-white drop-shadow" fill="currentColor" viewBox="0 0 24 24">
                                                                     <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z" />
                                                                 </svg>
                                                             ) : (
@@ -277,11 +394,10 @@ export default function DiscoverPage() {
                                                 <button
                                                     onClick={() => saveSingleSong(i)}
                                                     disabled={isSaved || isSaving || !song.spotify_uri}
-                                                    className={`rounded-lg p-2 transition ${
-                                                        isSaved
-                                                            ? "text-green-400"
-                                                            : "text-gray-500 hover:bg-green-500/10 hover:text-green-400"
-                                                    } disabled:cursor-default`}
+                                                    className={`rounded-lg p-2 transition ${isSaved
+                                                        ? "text-green-400"
+                                                        : "text-gray-500 hover:bg-green-500/10 hover:text-green-400"
+                                                        } disabled:cursor-default`}
                                                     title={isSaved ? "Gespeichert ✓" : "Zu Lieblingssongs hinzufügen"}
                                                 >
                                                     {isSaving ? (
@@ -310,17 +426,17 @@ export default function DiscoverPage() {
                                             </div>
                                         </div>
 
-                                        {/* Spotify Embed – compact with autoplay */}
+                                        {/* Spotify Embed Player */}
                                         {isExpanded && trackId && (
                                             <div
-                                                className="border-t border-white/5"
+                                                className="border-t border-white/5 bg-black/20"
                                                 style={{ animation: "slideDown 200ms ease-out" }}
                                             >
                                                 <iframe
-                                                    key={`embed-${trackId}`}
+                                                    key={`embed-${trackId}-${i}`}
                                                     src={`https://open.spotify.com/embed/track/${trackId}?utm_source=generator&theme=0`}
                                                     width="100%"
-                                                    height="152"
+                                                    height="80"
                                                     frameBorder="0"
                                                     allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
                                                     style={{ border: "none", display: "block" }}
@@ -339,7 +455,7 @@ export default function DiscoverPage() {
                     <div className="space-y-2">
                         {[...Array(8)].map((_, i) => (
                             <div key={i} className="glass-light flex animate-pulse items-center gap-3 rounded-xl p-3">
-                                <div className="h-12 w-12 rounded-lg bg-gray-700" />
+                                <div className="h-14 w-14 rounded-lg bg-gray-700" />
                                 <div className="flex-1 space-y-2">
                                     <div className="h-4 w-3/4 rounded bg-gray-700" />
                                     <div className="h-3 w-1/2 rounded bg-gray-700" />
