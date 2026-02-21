@@ -165,24 +165,71 @@ async def discover(
 SPOTIFY_API_BASE = "https://api.spotify.com/v1"
 
 
-@router.get("/playlist-tracks")
-async def get_playlist_tracks(
-    playlist_url: str,
+@router.get("/my-playlists")
+async def get_my_playlists(
     current_user: User = Depends(get_current_user),
 ):
-    """Extract track names from a Spotify playlist URL/ID."""
+    """Return all playlists belonging to the current user."""
     if not current_user.spotify_access_token:
         raise HTTPException(status_code=400, detail="No Spotify token.")
 
-    # Extract playlist ID from various URL formats
-    playlist_id = playlist_url.strip()
-    if "spotify.com/playlist/" in playlist_id:
-        playlist_id = playlist_id.split("playlist/")[1].split("?")[0].split("/")[0]
-    elif "spotify:playlist:" in playlist_id:
-        playlist_id = playlist_id.split(":")[-1]
+    playlists: list[dict] = []
+    url = f"{SPOTIFY_API_BASE}/me/playlists"
+    params: dict = {"limit": 50}
+
+    async with httpx.AsyncClient() as client:
+        while url:
+            resp = await client.get(
+                url,
+                params=params,
+                headers={"Authorization": f"Bearer {current_user.spotify_access_token}"},
+            )
+            if resp.status_code != 200:
+                raise HTTPException(status_code=resp.status_code, detail="Playlists konnten nicht geladen werden.")
+
+            data = resp.json()
+            for item in data.get("items", []):
+                if not item:
+                    continue
+                images = item.get("images", [])
+                playlists.append({
+                    "id": item["id"],
+                    "name": item.get("name", ""),
+                    "image": images[0]["url"] if images else None,
+                    "total_tracks": item.get("tracks", {}).get("total", 0),
+                    "owner": item.get("owner", {}).get("display_name", ""),
+                })
+
+            url = data.get("next")
+            params = {}
+
+    return {"playlists": playlists}
+
+
+@router.get("/playlist-tracks")
+async def get_playlist_tracks(
+    playlist_id: str | None = None,
+    playlist_url: str | None = None,
+    current_user: User = Depends(get_current_user),
+):
+    """Extract track names from a Spotify playlist URL or ID."""
+    if not current_user.spotify_access_token:
+        raise HTTPException(status_code=400, detail="No Spotify token.")
+
+    # Resolve the playlist ID from whichever param was provided
+    resolved_id = playlist_id
+    if not resolved_id and playlist_url:
+        resolved_id = playlist_url.strip()
+        if "spotify.com/playlist/" in resolved_id:
+            resolved_id = resolved_id.split("playlist/")[1].split("?")[0].split("/")[0]
+        elif "spotify:playlist:" in resolved_id:
+            resolved_id = resolved_id.split(":")[-1]
+
+    if not resolved_id:
+        raise HTTPException(status_code=400, detail="playlist_id oder playlist_url ist erforderlich.")
 
     songs: list[str] = []
-    url = f"{SPOTIFY_API_BASE}/playlists/{playlist_id}/tracks"
+    url = f"{SPOTIFY_API_BASE}/playlists/{resolved_id}/tracks"
     params = {"fields": "items(track(name,artists(name))),next", "limit": 100}
 
     async with httpx.AsyncClient() as client:

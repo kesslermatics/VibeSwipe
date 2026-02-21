@@ -26,6 +26,18 @@ interface PlaylistTracksResult {
     total: number;
 }
 
+interface SpotifyPlaylist {
+    id: string;
+    name: string;
+    image: string | null;
+    total_tracks: number;
+    owner: string;
+}
+
+interface MyPlaylistsResult {
+    playlists: SpotifyPlaylist[];
+}
+
 function extractTrackId(uri: string | null): string | null {
     if (!uri) return null;
     const parts = uri.split(":");
@@ -52,39 +64,58 @@ export default function DiscoverPage() {
     const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
 
     // Playlist context
-    const [showPlaylistInput, setShowPlaylistInput] = useState(false);
-    const [playlistUrl, setPlaylistUrl] = useState("");
+    const [showPlaylistPicker, setShowPlaylistPicker] = useState(false);
+    const [playlists, setPlaylists] = useState<SpotifyPlaylist[]>([]);
+    const [loadingPlaylists, setLoadingPlaylists] = useState(false);
+    const [selectedPlaylist, setSelectedPlaylist] = useState<SpotifyPlaylist | null>(null);
     const [contextSongs, setContextSongs] = useState<string[]>([]);
-    const [loadingPlaylist, setLoadingPlaylist] = useState(false);
-    const [playlistLoaded, setPlaylistLoaded] = useState(false);
+    const [loadingPlaylistTracks, setLoadingPlaylistTracks] = useState(false);
 
     const toggleEmbed = (idx: number) => {
         setExpandedIdx(expandedIdx === idx ? null : idx);
     };
 
-    const loadPlaylistContext = async () => {
-        if (!playlistUrl.trim()) return;
-        setLoadingPlaylist(true);
+    const openPlaylistPicker = async () => {
+        setShowPlaylistPicker(true);
+        if (playlists.length > 0) return; // already loaded
+        setLoadingPlaylists(true);
+        setError("");
+        try {
+            const data = await api<MyPlaylistsResult>("/my-playlists", {
+                method: "GET",
+                token: token || "",
+            });
+            setPlaylists(data.playlists);
+        } catch (err: unknown) {
+            setError(err instanceof Error ? err.message : "Playlists konnten nicht geladen werden");
+        } finally {
+            setLoadingPlaylists(false);
+        }
+    };
+
+    const selectPlaylist = async (playlist: SpotifyPlaylist) => {
+        setSelectedPlaylist(playlist);
+        setShowPlaylistPicker(false);
+        setLoadingPlaylistTracks(true);
         setError("");
         try {
             const data = await api<PlaylistTracksResult>(
-                `/playlist-tracks?url=${encodeURIComponent(playlistUrl.trim())}`,
+                `/playlist-tracks?playlist_id=${encodeURIComponent(playlist.id)}`,
                 { method: "GET", token: token || "" }
             );
             setContextSongs(data.songs);
-            setPlaylistLoaded(true);
         } catch (err: unknown) {
-            setError(err instanceof Error ? err.message : "Playlist konnte nicht geladen werden");
+            setError(err instanceof Error ? err.message : "Playlist-Songs konnten nicht geladen werden");
+            setSelectedPlaylist(null);
         } finally {
-            setLoadingPlaylist(false);
+            setLoadingPlaylistTracks(false);
         }
     };
 
     const clearPlaylistContext = () => {
         setContextSongs([]);
-        setPlaylistLoaded(false);
-        setPlaylistUrl("");
-        setShowPlaylistInput(false);
+        setSelectedPlaylist(null);
+        setShowPlaylistPicker(false);
     };
 
     const handleDiscover = async (e: React.FormEvent) => {
@@ -192,8 +223,8 @@ export default function DiscoverPage() {
                             value={prompt}
                             onChange={(e) => setPrompt(e.target.value)}
                             placeholder={
-                                playlistLoaded
-                                    ? `Playlist mit ${contextSongs.length} Songs als Inspiration geladen! Beschreibe, was du entdecken willst…`
+                                selectedPlaylist
+                                    ? `„${selectedPlaylist.name}" als Inspiration geladen (${contextSongs.length} Songs)! Beschreibe, was du entdecken willst…`
                                     : 'z.B. "Chill Lo-Fi zum Lernen", "Party Songs wie bei Tomorrowland", "Melancholische Indie Songs für einen Regentag"...'
                             }
                             rows={3}
@@ -202,10 +233,11 @@ export default function DiscoverPage() {
 
                         {/* Playlist context section */}
                         <div className="mt-3 border-t border-white/5 pt-3">
-                            {!showPlaylistInput && !playlistLoaded && (
+                            {/* Button to open picker */}
+                            {!showPlaylistPicker && !selectedPlaylist && (
                                 <button
                                     type="button"
-                                    onClick={() => setShowPlaylistInput(true)}
+                                    onClick={openPlaylistPicker}
                                     className="flex items-center gap-2 text-xs text-gray-500 transition hover:text-purple-400"
                                 >
                                     <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -215,47 +247,73 @@ export default function DiscoverPage() {
                                 </button>
                             )}
 
-                            {showPlaylistInput && !playlistLoaded && (
-                                <div className="flex items-center gap-2">
-                                    <input
-                                        type="text"
-                                        value={playlistUrl}
-                                        onChange={(e) => setPlaylistUrl(e.target.value)}
-                                        placeholder="Spotify Playlist URL einfügen…"
-                                        className="flex-1 rounded-lg bg-white/5 px-3 py-2 text-xs text-gray-100 placeholder-gray-500 outline-none ring-1 ring-white/10 focus:ring-purple-500/50"
-                                    />
-                                    <button
-                                        type="button"
-                                        onClick={loadPlaylistContext}
-                                        disabled={loadingPlaylist || !playlistUrl.trim()}
-                                        className="flex items-center gap-1.5 rounded-lg bg-purple-500 px-3 py-2 text-xs font-semibold text-white transition hover:bg-purple-400 disabled:opacity-50"
-                                    >
-                                        {loadingPlaylist ? (
-                                            <div className="h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                                        ) : (
-                                            "Laden"
-                                        )}
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => { setShowPlaylistInput(false); setPlaylistUrl(""); }}
-                                        className="rounded-lg p-2 text-gray-500 transition hover:text-gray-300"
-                                    >
-                                        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                                        </svg>
-                                    </button>
+                            {/* Playlist picker grid */}
+                            {showPlaylistPicker && !selectedPlaylist && (
+                                <div>
+                                    <div className="mb-2 flex items-center justify-between">
+                                        <p className="text-xs font-medium text-gray-400">Wähle eine Playlist:</p>
+                                        <button
+                                            type="button"
+                                            onClick={() => setShowPlaylistPicker(false)}
+                                            className="rounded-lg p-1 text-gray-500 transition hover:text-gray-300"
+                                        >
+                                            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                                            </svg>
+                                        </button>
+                                    </div>
+                                    {loadingPlaylists ? (
+                                        <div className="flex items-center justify-center py-6">
+                                            <div className="h-5 w-5 animate-spin rounded-full border-2 border-purple-400 border-t-transparent" />
+                                        </div>
+                                    ) : (
+                                        <div className="max-h-52 space-y-1 overflow-y-auto rounded-lg pr-1">
+                                            {playlists.map((pl) => (
+                                                <button
+                                                    key={pl.id}
+                                                    type="button"
+                                                    onClick={() => selectPlaylist(pl)}
+                                                    className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left transition hover:bg-white/5"
+                                                >
+                                                    <div className="h-10 w-10 flex-shrink-0 overflow-hidden rounded bg-gray-800">
+                                                        {pl.image ? (
+                                                            <img src={pl.image} alt={pl.name} className="h-full w-full object-cover" />
+                                                        ) : (
+                                                            <div className="flex h-full w-full items-center justify-center text-sm text-gray-600">🎵</div>
+                                                        )}
+                                                    </div>
+                                                    <div className="min-w-0 flex-1">
+                                                        <p className="truncate text-xs font-medium text-gray-200">{pl.name}</p>
+                                                        <p className="text-[10px] text-gray-500">{pl.total_tracks} Songs · {pl.owner}</p>
+                                                    </div>
+                                                </button>
+                                            ))}
+                                            {playlists.length === 0 && !loadingPlaylists && (
+                                                <p className="py-4 text-center text-xs text-gray-500">Keine Playlists gefunden</p>
+                                            )}
+                                        </div>
+                                    )}
                                 </div>
                             )}
 
-                            {playlistLoaded && (
+                            {/* Selected playlist badge */}
+                            {selectedPlaylist && (
                                 <div className="flex items-center justify-between">
                                     <div className="flex items-center gap-2">
+                                        <div className="h-8 w-8 flex-shrink-0 overflow-hidden rounded bg-gray-800">
+                                            {selectedPlaylist.image ? (
+                                                <img src={selectedPlaylist.image} alt={selectedPlaylist.name} className="h-full w-full object-cover" />
+                                            ) : (
+                                                <div className="flex h-full w-full items-center justify-center text-xs text-gray-600">🎵</div>
+                                            )}
+                                        </div>
                                         <span className="inline-flex items-center gap-1 rounded-full bg-purple-500/20 px-2.5 py-1 text-xs font-medium text-purple-400 ring-1 ring-purple-500/30">
-                                            <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                                <path strokeLinecap="round" strokeLinejoin="round" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
-                                            </svg>
-                                            {contextSongs.length} Songs als Kontext
+                                            {selectedPlaylist.name}
+                                            {loadingPlaylistTracks ? (
+                                                <div className="ml-1 h-3 w-3 animate-spin rounded-full border-2 border-purple-400 border-t-transparent" />
+                                            ) : (
+                                                <span className="ml-1 text-purple-400/60">· {contextSongs.length} Songs</span>
+                                            )}
                                         </span>
                                     </div>
                                     <button
