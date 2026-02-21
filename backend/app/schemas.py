@@ -41,3 +41,17 @@ class SongResult(BaseModel):
 class DiscoverResponse(BaseModel):
     songs: list[SongResult]
     mood_summary: str
+
+
+# ── Playlist ──────────────────────────────────────────
+class CreatePlaylistRequest(BaseModel):
+    name: str
+    description: str = ""
+    track_uris: list[str]
+
+
+class CreatePlaylistResponse(BaseModel):
+    playlist_url: str
+    playlist_id: str
+    name: str
+    total_tracks: int

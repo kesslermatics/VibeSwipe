@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.database import get_db
 from app.models import User
-from app.schemas import SpotifyCallback, Token, UserResponse, MessageResponse, DiscoverRequest, DiscoverResponse
+from app.schemas import SpotifyCallback, Token, UserResponse, MessageResponse, DiscoverRequest, DiscoverResponse, CreatePlaylistRequest, CreatePlaylistResponse
 from app.auth import create_access_token, get_current_user
 from app.discover import discover_songs
 
@@ -17,7 +17,7 @@ settings = get_settings()
 SPOTIFY_AUTH_URL = "https://accounts.spotify.com/authorize"
 SPOTIFY_TOKEN_URL = "https://accounts.spotify.com/api/token"
 SPOTIFY_ME_URL = "https://api.spotify.com/v1/me"
-SPOTIFY_SCOPES = "user-read-email user-read-private user-top-read user-library-read"
+SPOTIFY_SCOPES = "user-read-email user-read-private user-top-read user-library-read playlist-modify-public playlist-modify-private"
 
 
 def _normalize_uri(uri: str) -> str:
@@ -154,6 +154,76 @@ async def discover(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Discovery failed: {str(e)}",
+        )
+
+
+# ── Create Spotify playlist from liked songs ─────────
+SPOTIFY_API_BASE = "https://api.spotify.com/v1"
+
+
+@router.post("/create-playlist", response_model=CreatePlaylistResponse)
+async def create_playlist(
+    payload: CreatePlaylistRequest,
+    current_user: User = Depends(get_current_user),
+):
+    if not current_user.spotify_access_token:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No Spotify access token found. Please re-login.",
+        )
+
+    headers = {"Authorization": f"Bearer {current_user.spotify_access_token}"}
+
+    try:
+        async with httpx.AsyncClient() as client:
+            # 1. Create an empty playlist on the user's account
+            create_resp = await client.post(
+                f"{SPOTIFY_API_BASE}/users/{current_user.spotify_id}/playlists",
+                headers=headers,
+                json={
+                    "name": payload.name,
+                    "description": payload.description,
+                    "public": False,
+                },
+            )
+
+        if create_resp.status_code not in (200, 201):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Failed to create playlist: {create_resp.text}",
+            )
+
+        playlist = create_resp.json()
+        playlist_id = playlist["id"]
+
+        # 2. Add tracks in chunks of 100 (Spotify limit)
+        for i in range(0, len(payload.track_uris), 100):
+            chunk = payload.track_uris[i : i + 100]
+            async with httpx.AsyncClient() as client:
+                add_resp = await client.post(
+                    f"{SPOTIFY_API_BASE}/playlists/{playlist_id}/tracks",
+                    headers=headers,
+                    json={"uris": chunk},
+                )
+            if add_resp.status_code not in (200, 201):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Failed to add tracks: {add_resp.text}",
+                )
+
+        return {
+            "playlist_url": playlist["external_urls"]["spotify"],
+            "playlist_id": playlist_id,
+            "name": payload.name,
+            "total_tracks": len(payload.track_uris),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Playlist creation failed: {str(e)}",
         )
 
 
