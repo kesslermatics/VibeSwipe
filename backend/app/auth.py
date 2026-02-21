@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 from typing import Optional
+import logging
 
 import httpx
 from jose import JWTError, jwt
@@ -12,6 +13,7 @@ from app.database import get_db
 from app.models import User
 
 settings = get_settings()
+logger = logging.getLogger(__name__)
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/callback")
 
@@ -79,8 +81,11 @@ async def get_valid_spotify_token(user: User, db: Session) -> str:
             headers={"Authorization": f"Bearer {user.spotify_access_token}"},
         )
 
+    logger.info(f"get_valid_spotify_token /me check: status={resp.status_code} for user={user.spotify_id}")
+
     if resp.status_code in (401, 403):
         # Token expired or missing scopes → refresh
+        logger.warning(f"Token invalid ({resp.status_code}), refreshing for user={user.spotify_id}")
         return await refresh_spotify_token(user, db)
 
     if resp.status_code != 200:

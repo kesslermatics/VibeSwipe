@@ -1,8 +1,11 @@
 from urllib.parse import urlencode
+import logging
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
+
+logger = logging.getLogger(__name__)
 
 from app.config import get_settings
 from app.database import get_db
@@ -182,7 +185,8 @@ async def get_my_playlists(
                 headers={"Authorization": f"Bearer {spotify_token}"},
             )
             if resp.status_code != 200:
-                raise HTTPException(status_code=resp.status_code, detail="Playlists konnten nicht geladen werden.")
+                logger.error(f"my-playlists failed: status={resp.status_code}, body={resp.text[:300]}")
+                raise HTTPException(status_code=resp.status_code, detail=f"Playlists konnten nicht geladen werden: {resp.text[:200]}")
 
             data = resp.json()
             for item in data.get("items", []):
@@ -237,18 +241,23 @@ async def get_playlist_tracks(
                 params=params,
                 headers={"Authorization": f"Bearer {spotify_token}"},
             )
+            logger.info(f"playlist-tracks first attempt: status={resp.status_code}, playlist={resolved_id}")
             # If 401/403, try refreshing the token once
             if resp.status_code in (401, 403):
+                logger.warning(f"playlist-tracks got {resp.status_code}, response: {resp.text[:300]}")
                 spotify_token = await refresh_spotify_token(current_user, db)
                 resp = await client.get(
                     url,
                     params=params,
                     headers={"Authorization": f"Bearer {spotify_token}"},
                 )
+                logger.info(f"playlist-tracks after refresh: status={resp.status_code}")
             if resp.status_code != 200:
+                error_body = resp.text[:500]
+                logger.error(f"playlist-tracks failed: status={resp.status_code}, body={error_body}")
                 raise HTTPException(
                     status_code=resp.status_code,
-                    detail=f"Playlist konnte nicht geladen werden: {resp.text[:200]}",
+                    detail=f"Spotify API Fehler ({resp.status_code}): {error_body}",
                 )
 
             data = resp.json()
