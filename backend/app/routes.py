@@ -408,3 +408,51 @@ async def save_tracks(
 @router.get("/health")
 def health_check():
     return {"status": "ok"}
+
+
+# ── Debug: Check Spotify token scopes ─────────────────
+@router.get("/debug/token-info")
+async def debug_token_info(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Debug endpoint to check what scopes the current Spotify token has."""
+    spotify_token = await get_valid_spotify_token(current_user, db)
+
+    # Test each relevant endpoint
+    results: dict = {"user": current_user.spotify_id}
+    async with httpx.AsyncClient() as client:
+        # Test /me
+        r = await client.get(
+            "https://api.spotify.com/v1/me",
+            headers={"Authorization": f"Bearer {spotify_token}"},
+        )
+        results["me_status"] = r.status_code
+
+        # Test /me/playlists
+        r = await client.get(
+            "https://api.spotify.com/v1/me/playlists?limit=1",
+            headers={"Authorization": f"Bearer {spotify_token}"},
+        )
+        results["playlists_status"] = r.status_code
+        if r.status_code == 200:
+            data = r.json()
+            items = data.get("items", [])
+            results["playlists_count"] = data.get("total", 0)
+            if items and items[0]:
+                results["first_playlist_id"] = items[0].get("id")
+                results["first_playlist_tracks"] = items[0].get("tracks", {})
+
+                # Test getting tracks from the first playlist
+                pid = items[0]["id"]
+                r2 = await client.get(
+                    f"https://api.spotify.com/v1/playlists/{pid}/tracks?limit=1",
+                    headers={"Authorization": f"Bearer {spotify_token}"},
+                )
+                results["playlist_tracks_status"] = r2.status_code
+                if r2.status_code != 200:
+                    results["playlist_tracks_error"] = r2.text[:300]
+        else:
+            results["playlists_error"] = r.text[:300]
+
+    return results
