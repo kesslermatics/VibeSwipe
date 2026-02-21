@@ -44,9 +44,19 @@ export default function DiscoverPage() {
     const [savingAll, setSavingAll] = useState(false);
     const [saveAllResult, setSaveAllResult] = useState<SaveResult | null>(null);
 
-    // Audio preview — use Spotify embed as fallback
+    // Audio preview
     const [playingIdx, setPlayingIdx] = useState<number | null>(null);
+    const [audioProgress, setAudioProgress] = useState(0);
+    const [audioDuration, setAudioDuration] = useState(0);
     const audioRef = useRef<HTMLAudioElement | null>(null);
+    const progressInterval = useRef<ReturnType<typeof setInterval> | null>(null);
+
+    const clearProgressInterval = () => {
+        if (progressInterval.current) {
+            clearInterval(progressInterval.current);
+            progressInterval.current = null;
+        }
+    };
 
     useEffect(() => {
         return () => {
@@ -54,6 +64,7 @@ export default function DiscoverPage() {
                 audioRef.current.pause();
                 audioRef.current = null;
             }
+            clearProgressInterval();
         };
     }, []);
 
@@ -83,29 +94,64 @@ export default function DiscoverPage() {
         }
     };
 
+    const stopPlayback = () => {
+        if (audioRef.current) {
+            audioRef.current.pause();
+            audioRef.current = null;
+        }
+        clearProgressInterval();
+        setPlayingIdx(null);
+        setAudioProgress(0);
+        setAudioDuration(0);
+    };
+
     const togglePreview = (idx: number, previewUrl?: string | null) => {
         // If already playing this song, stop it
         if (playingIdx === idx) {
-            if (audioRef.current) audioRef.current.pause();
-            setPlayingIdx(null);
+            stopPlayback();
             return;
         }
 
         // Stop any currently playing audio
-        if (audioRef.current) audioRef.current.pause();
-        audioRef.current = null;
+        stopPlayback();
 
-        // If there's a native preview_url, use it
         if (previewUrl) {
+            // Native 30-sec preview — plays instantly
             const audio = new Audio(previewUrl);
             audio.volume = 0.5;
-            audio.play();
-            audio.onended = () => setPlayingIdx(null);
+            audio.onloadedmetadata = () => setAudioDuration(audio.duration);
+            audio.onended = () => stopPlayback();
+            audio.onerror = () => {
+                // Native preview failed — just show embed
+                audioRef.current = null;
+                clearProgressInterval();
+            };
+            audio.play().catch(() => {});
             audioRef.current = audio;
-        }
 
-        // Toggle the embed player (works even without preview_url)
+            progressInterval.current = setInterval(() => {
+                if (audio && !audio.paused) {
+                    setAudioProgress(audio.currentTime);
+                }
+            }, 100);
+        }
+        // If no previewUrl, we'll show the Spotify embed with autoplay
+
         setPlayingIdx(idx);
+    };
+
+    const seekAudio = (e: React.MouseEvent<HTMLDivElement>) => {
+        if (!audioRef.current || !audioDuration) return;
+        const rect = e.currentTarget.getBoundingClientRect();
+        const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+        audioRef.current.currentTime = pct * audioDuration;
+        setAudioProgress(audioRef.current.currentTime);
+    };
+
+    const formatTime = (s: number) => {
+        const m = Math.floor(s / 60);
+        const sec = Math.floor(s % 60);
+        return `${m}:${sec.toString().padStart(2, "0")}`;
     };
 
     const saveSingleSong = async (idx: number) => {
@@ -253,23 +299,46 @@ export default function DiscoverPage() {
                                 const isSaved = savedSongs.has(i);
                                 const isSaving = savingIdx === i;
                                 const isPlaying = playingIdx === i;
+                                const hasNativeAudio = isPlaying && audioRef.current && audioDuration > 0;
+                                const trackId = extractTrackId(song.spotify_uri);
 
                                 return (
                                     <div
                                         key={i}
-                                        className={`rounded-xl transition-all ${isSaved
+                                        className={`overflow-hidden rounded-xl transition-all ${isSaved
                                                 ? "bg-green-500/10 ring-1 ring-green-500/30"
                                                 : "glass-light hover:ring-1 hover:ring-white/10"
                                             }`}
                                     >
                                         <div className="flex items-center gap-3 p-3">
-                                            {/* Album Art */}
-                                            <div className="relative h-14 w-14 flex-shrink-0 overflow-hidden rounded-lg bg-gray-800">
+                                            {/* Album Art – click to toggle preview */}
+                                            <button
+                                                onClick={() => song.spotify_uri && togglePreview(i, song.preview_url)}
+                                                disabled={!song.spotify_uri}
+                                                className="group relative h-12 w-12 flex-shrink-0 overflow-hidden rounded-lg bg-gray-800 disabled:cursor-default"
+                                            >
                                                 {song.album_image ? (
                                                     <img src={song.album_image} alt={song.title} className="h-full w-full object-cover" />
                                                 ) : (
-                                                    <div className="flex h-full w-full items-center justify-center text-xl text-gray-600">🎵</div>
+                                                    <div className="flex h-full w-full items-center justify-center text-lg text-gray-600">🎵</div>
                                                 )}
+                                                {/* Play/Pause overlay */}
+                                                {song.spotify_uri && (
+                                                    <div className={`absolute inset-0 flex items-center justify-center transition ${isPlaying ? "bg-black/50" : "bg-black/0 group-hover:bg-black/40"}`}>
+                                                        <div className={`transition ${isPlaying ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}>
+                                                            {isPlaying ? (
+                                                                <svg className="h-5 w-5 text-white drop-shadow" fill="currentColor" viewBox="0 0 24 24">
+                                                                    <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z" />
+                                                                </svg>
+                                                            ) : (
+                                                                <svg className="h-5 w-5 text-white drop-shadow ml-0.5" fill="currentColor" viewBox="0 0 24 24">
+                                                                    <path d="M8 5v14l11-7z" />
+                                                                </svg>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                )}
+                                                {/* Playing indicator bars */}
                                                 {isPlaying && (
                                                     <div className="absolute bottom-0.5 left-0.5 right-0.5 flex h-1.5 items-end justify-center gap-[2px]">
                                                         <div className="w-[3px] animate-bounce rounded-full bg-green-400" style={{ animationDelay: "0ms", height: "6px" }} />
@@ -277,36 +346,32 @@ export default function DiscoverPage() {
                                                         <div className="w-[3px] animate-bounce rounded-full bg-green-400" style={{ animationDelay: "300ms", height: "5px" }} />
                                                     </div>
                                                 )}
-                                            </div>
-
-                                            {/* Play/Pause button – always visible if we have a spotify_uri */}
-                                            {song.spotify_uri ? (
-                                                <button
-                                                    onClick={() => togglePreview(i, song.preview_url)}
-                                                    className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full transition ${isPlaying
-                                                            ? "bg-green-500 text-gray-950"
-                                                            : "bg-white/10 text-white hover:bg-green-500 hover:text-gray-950"
-                                                        }`}
-                                                    title={isPlaying ? "Pause" : "Anhören"}
-                                                >
-                                                    {isPlaying ? (
-                                                        <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 24 24">
-                                                            <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z" />
-                                                        </svg>
-                                                    ) : (
-                                                        <svg className="h-4 w-4 ml-0.5" fill="currentColor" viewBox="0 0 24 24">
-                                                            <path d="M8 5v14l11-7z" />
-                                                        </svg>
-                                                    )}
-                                                </button>
-                                            ) : (
-                                                <div className="h-9 w-9 flex-shrink-0" />
-                                            )}
+                                            </button>
 
                                             {/* Song Info */}
                                             <div className="min-w-0 flex-1">
                                                 <p className="truncate text-sm font-medium text-gray-100">{song.title}</p>
                                                 <p className="truncate text-xs text-gray-400">{song.artist}</p>
+                                                {/* Inline progress bar for native audio preview */}
+                                                {hasNativeAudio && (
+                                                    <div className="mt-1.5 flex items-center gap-2">
+                                                        <span className="text-[10px] tabular-nums text-gray-500">{formatTime(audioProgress)}</span>
+                                                        <div
+                                                            className="relative h-1 flex-1 cursor-pointer rounded-full bg-white/10"
+                                                            onClick={seekAudio}
+                                                        >
+                                                            <div
+                                                                className="absolute inset-y-0 left-0 rounded-full bg-green-400 transition-[width] duration-100"
+                                                                style={{ width: `${(audioProgress / audioDuration) * 100}%` }}
+                                                            />
+                                                            <div
+                                                                className="absolute top-1/2 -translate-y-1/2 h-2.5 w-2.5 rounded-full bg-white shadow-md transition-[left] duration-100"
+                                                                style={{ left: `calc(${(audioProgress / audioDuration) * 100}% - 5px)` }}
+                                                            />
+                                                        </div>
+                                                        <span className="text-[10px] tabular-nums text-gray-500">{formatTime(audioDuration)}</span>
+                                                    </div>
+                                                )}
                                             </div>
 
                                             {/* Actions */}
@@ -347,18 +412,20 @@ export default function DiscoverPage() {
                                             </div>
                                         </div>
 
-                                        {/* Spotify Embed Player – shown when playing */}
-                                        {isPlaying && song.spotify_uri && (
-                                            <div className="px-3 pb-3">
+                                        {/* Spotify Embed fallback – only if no native preview, with autoplay */}
+                                        {isPlaying && trackId && !audioRef.current && (
+                                            <div
+                                                className="border-t border-white/5 bg-black/20"
+                                                style={{ animation: "slideDown 200ms ease-out" }}
+                                            >
                                                 <iframe
-                                                    src={`https://open.spotify.com/embed/track/${extractTrackId(song.spotify_uri)}?utm_source=generator&theme=0`}
+                                                    key={`embed-${trackId}-${i}`}
+                                                    src={`https://open.spotify.com/embed/track/${trackId}?utm_source=generator&theme=0`}
                                                     width="100%"
                                                     height="80"
                                                     frameBorder="0"
                                                     allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
-                                                    loading="lazy"
-                                                    className="rounded-lg"
-                                                    style={{ borderRadius: "12px" }}
+                                                    style={{ border: "none", display: "block" }}
                                                 />
                                             </div>
                                         )}
