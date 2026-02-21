@@ -7,8 +7,9 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.database import get_db
 from app.models import User
-from app.schemas import SpotifyCallback, Token, UserResponse, MessageResponse
+from app.schemas import SpotifyCallback, Token, UserResponse, MessageResponse, DiscoverRequest, DiscoverResponse
 from app.auth import create_access_token, get_current_user
+from app.discover import discover_songs
 
 router = APIRouter()
 settings = get_settings()
@@ -132,6 +133,28 @@ async def spotify_callback(payload: SpotifyCallback, db: Session = Depends(get_d
 @router.get("/me", response_model=UserResponse)
 def get_me(current_user: User = Depends(get_current_user)):
     return current_user
+
+
+# ── Discover songs via Gemini + Spotify ──────────────
+@router.post("/discover", response_model=DiscoverResponse)
+async def discover(
+    payload: DiscoverRequest,
+    current_user: User = Depends(get_current_user),
+):
+    if not current_user.spotify_access_token:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No Spotify access token found. Please re-login.",
+        )
+
+    try:
+        result = await discover_songs(payload.prompt, current_user.spotify_access_token)
+        return result
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Discovery failed: {str(e)}",
+        )
 
 
 # ── Health check ──────────────────────────────────────

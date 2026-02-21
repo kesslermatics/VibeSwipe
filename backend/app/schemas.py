@@ -22,3 +22,22 @@ class UserResponse(BaseModel):
 
 class MessageResponse(BaseModel):
     message: str
+
+
+# ── Discover ──────────────────────────────────────────
+class DiscoverRequest(BaseModel):
+    prompt: str
+
+
+class SongResult(BaseModel):
+    title: str
+    artist: str
+    spotify_url: str | None = None
+    album_image: str | None = None
+    preview_url: str | None = None
+    spotify_uri: str | None = None
+
+
+class DiscoverResponse(BaseModel):
+    songs: list[SongResult]
+    mood_summary: str

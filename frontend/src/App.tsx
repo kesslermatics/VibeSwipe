@@ -2,6 +2,7 @@ import { Routes, Route, Navigate } from "react-router-dom";
 import LoginPage from "./pages/LoginPage";
 import CallbackPage from "./pages/CallbackPage";
 import HomePage from "./pages/HomePage";
+import DiscoverPage from "./pages/DiscoverPage";
 
 function App() {
   const isLoggedIn = !!localStorage.getItem("token");
@@ -18,6 +19,7 @@ function App() {
         <Route path="/login" element={isLoggedIn ? <Navigate to="/" replace /> : <LoginPage />} />
         <Route path="/callback" element={<CallbackPage />} />
         <Route path="/" element={isLoggedIn ? <HomePage /> : <Navigate to="/login" replace />} />
+        <Route path="/discover" element={isLoggedIn ? <DiscoverPage /> : <Navigate to="/login" replace />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </div>
