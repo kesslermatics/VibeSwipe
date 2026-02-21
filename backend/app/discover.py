@@ -69,11 +69,11 @@ async def ask_gemini(prompt: str) -> dict:
 
 
 async def search_spotify(query: str, spotify_token: str) -> dict | None:
-    """Search Spotify for a track and return the first result, including preview URL."""
+    """Search Spotify for a track and return the first result."""
     async with httpx.AsyncClient() as client:
         resp = await client.get(
             SPOTIFY_SEARCH_URL,
-            params={"q": query, "type": "track", "limit": 1, "market": "DE"},
+            params={"q": query, "type": "track", "limit": 1},
             headers={"Authorization": f"Bearer {spotify_token}"},
         )
 
@@ -86,28 +86,13 @@ async def search_spotify(query: str, spotify_token: str) -> dict | None:
 
     track = items[0]
     album_images = track.get("album", {}).get("images", [])
-    preview_url = track.get("preview_url")
-
-    # If no preview_url from search, try fetching the track directly with market
-    if not preview_url and track.get("id"):
-        try:
-            async with httpx.AsyncClient() as client:
-                track_resp = await client.get(
-                    f"https://api.spotify.com/v1/tracks/{track['id']}",
-                    params={"market": "DE"},
-                    headers={"Authorization": f"Bearer {spotify_token}"},
-                )
-            if track_resp.status_code == 200:
-                preview_url = track_resp.json().get("preview_url")
-        except Exception:
-            pass
 
     return {
         "title": track["name"],
         "artist": ", ".join(a["name"] for a in track["artists"]),
         "spotify_url": track["external_urls"].get("spotify"),
         "album_image": album_images[0]["url"] if album_images else None,
-        "preview_url": preview_url,
+        "preview_url": track.get("preview_url"),
         "spotify_uri": track.get("uri"),
     }
 
