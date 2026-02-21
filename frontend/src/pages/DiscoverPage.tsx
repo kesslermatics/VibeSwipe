@@ -105,7 +105,12 @@ export default function DiscoverPage({ onLogout: _onLogout }: { onLogout: () => 
             );
             setContextSongs(data.songs);
         } catch (err: unknown) {
-            setError(err instanceof Error ? err.message : "Playlist-Songs konnten nicht geladen werden");
+            const msg = err instanceof Error ? err.message : "";
+            if (msg.includes("403") || msg.includes("Forbidden")) {
+                setError("Fehlende Berechtigung. Bitte logge dich aus und neu ein, damit Spotify die nötigen Rechte erteilt.");
+            } else {
+                setError(msg || "Playlist-Songs konnten nicht geladen werden");
+            }
             setSelectedPlaylist(null);
         } finally {
             setLoadingPlaylistTracks(false);

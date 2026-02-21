@@ -8,7 +8,7 @@ from app.config import get_settings
 from app.database import get_db
 from app.models import User
 from app.schemas import SpotifyCallback, Token, UserResponse, MessageResponse, DiscoverRequest, DiscoverResponse, CreatePlaylistRequest, CreatePlaylistResponse, SaveTracksRequest, SaveTracksResponse
-from app.auth import create_access_token, get_current_user, get_valid_spotify_token
+from app.auth import create_access_token, get_current_user, get_valid_spotify_token, refresh_spotify_token
 from app.discover import discover_songs
 
 router = APIRouter()
@@ -188,13 +188,14 @@ async def get_my_playlists(
             for item in data.get("items", []):
                 if not item:
                     continue
-                images = item.get("images", [])
+                images = item.get("images") or []
+                tracks_obj = item.get("tracks") or {}
                 playlists.append({
                     "id": item["id"],
                     "name": item.get("name", ""),
                     "image": images[0]["url"] if images else None,
-                    "total_tracks": item.get("tracks", {}).get("total", 0),
-                    "owner": item.get("owner", {}).get("display_name", ""),
+                    "total_tracks": tracks_obj.get("total", 0) if isinstance(tracks_obj, dict) else 0,
+                    "owner": (item.get("owner") or {}).get("display_name", ""),
                 })
 
             url = data.get("next")
@@ -227,7 +228,7 @@ async def get_playlist_tracks(
 
     songs: list[str] = []
     url = f"{SPOTIFY_API_BASE}/playlists/{resolved_id}/tracks"
-    params = {"fields": "items(track(name,artists(name))),next", "limit": 100}
+    params: dict = {"fields": "items(track(name,artists(name))),next", "limit": 100}
 
     async with httpx.AsyncClient() as client:
         while url:
@@ -236,6 +237,14 @@ async def get_playlist_tracks(
                 params=params,
                 headers={"Authorization": f"Bearer {spotify_token}"},
             )
+            # If 401/403, try refreshing the token once
+            if resp.status_code in (401, 403):
+                spotify_token = await refresh_spotify_token(current_user, db)
+                resp = await client.get(
+                    url,
+                    params=params,
+                    headers={"Authorization": f"Bearer {spotify_token}"},
+                )
             if resp.status_code != 200:
                 raise HTTPException(status_code=resp.status_code, detail="Playlist konnte nicht geladen werden.")
 
@@ -354,8 +363,8 @@ async def save_tracks(
                 f"{SPOTIFY_API_BASE}/users/{current_user.spotify_id}/playlists",
                 headers=headers,
                 json={
-                    "name": f"VibeSwipe Discover – {len(track_uris)} Songs",
-                    "description": "Erstellt mit VibeSwipe AI Discover",
+                    "name": f"SpotiVibe Discover – {len(track_uris)} Songs",
+                    "description": "Erstellt mit SpotiVibe AI Discover",
                     "public": False,
                 },
             )

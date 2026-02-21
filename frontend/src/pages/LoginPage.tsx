@@ -26,10 +26,10 @@ export default function LoginPage() {
                 {/* Logo */}
                 <div className="mb-8 text-center">
                     <h1 className="text-4xl font-bold tracking-tight">
-                        <span className="text-green-400">Vibe</span>Swipe
+                        <span className="text-green-400">Spoti</span>Vibe
                     </h1>
                     <p className="mt-3 text-sm text-gray-400">
-                        Discover music you'll love — one swipe at a time.
+                        Discover music you'll love — powered by AI.
                     </p>
                 </div>
 

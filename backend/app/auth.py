@@ -68,7 +68,7 @@ async def refresh_spotify_token(user: User, db: Session) -> str:
 
 async def get_valid_spotify_token(user: User, db: Session) -> str:
     """Get a valid Spotify access token, refreshing if needed.
-    Tries the current token with a test call; if 401, refreshes."""
+    Tries the current token with a test call; if 401/403, refreshes."""
     if not user.spotify_access_token:
         raise HTTPException(status_code=400, detail="No Spotify token. Please re-login.")
 
@@ -79,8 +79,8 @@ async def get_valid_spotify_token(user: User, db: Session) -> str:
             headers={"Authorization": f"Bearer {user.spotify_access_token}"},
         )
 
-    if resp.status_code == 401:
-        # Token expired → refresh
+    if resp.status_code in (401, 403):
+        # Token expired or missing scopes → refresh
         return await refresh_spotify_token(user, db)
 
     if resp.status_code != 200:

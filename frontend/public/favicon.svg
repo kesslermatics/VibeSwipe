@@ -11,17 +11,13 @@
   </defs>
   <!-- Rounded background -->
   <rect width="512" height="512" rx="96" fill="url(#bg)"/>
-  <!-- Music note -->
-  <g transform="translate(256,256)">
-    <!-- Note stem + flag -->
-    <rect x="30" y="-140" width="16" height="200" rx="8" fill="url(#accent)"/>
-    <path d="M46,-140 Q120,-180 120,-110 Q120,-60 46,-80" fill="url(#accent)"/>
-    <!-- Note head -->
-    <ellipse cx="10" cy="60" rx="50" ry="38" transform="rotate(-20,10,60)" fill="url(#accent)"/>
-    <!-- Swipe arrows -->
-    <g opacity="0.5">
-      <path d="M-140,-20 L-90,-20 M-100,-40 L-80,-20 L-100,0" stroke="#4ade80" stroke-width="14" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-      <path d="M140,20 L90,20 M100,40 L80,20 L100,0" stroke="#4ade80" stroke-width="14" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-    </g>
+  <!-- Spotify-style sound waves -->
+  <g transform="translate(256,256)" stroke="url(#accent)" stroke-width="28" stroke-linecap="round" fill="none">
+    <path d="M-120,-60 Q0,-120 120,-60" />
+    <path d="M-90,-10 Q0,-55 90,-10" />
+    <path d="M-60,35 Q0,5 60,35" />
   </g>
+  <!-- S letter -->
+  <text x="256" y="340" text-anchor="middle" font-family="Arial Black, sans-serif" font-weight="900" font-size="160" fill="url(#accent)">S</text>
+</svg>
 </svg>

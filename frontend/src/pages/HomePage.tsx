@@ -73,7 +73,7 @@ export default function HomePage({ onLogout }: { onLogout: () => void }) {
                 <div className="mb-10 flex items-center justify-between">
                     <div>
                         <h1 className="text-3xl font-bold tracking-tight">
-                            <span className="text-green-400">Vibe</span>Swipe
+                            <span className="text-green-400">Spoti</span>Vibe
                         </h1>
                         {user && (
                             <p className="mt-1 text-sm text-gray-400">

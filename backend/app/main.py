@@ -11,9 +11,9 @@ settings = get_settings()
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
-    title="VibeSwipe API",
+    title="SpotiVibe API",
     version="0.1.0",
-    description="Backend API for VibeSwipe",
+    description="Backend API for SpotiVibe",
 )
 
 # ── CORS ──────────────────────────────────────────────
