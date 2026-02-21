@@ -231,8 +231,8 @@ async def get_playlist_tracks(
         raise HTTPException(status_code=400, detail="playlist_id oder playlist_url ist erforderlich.")
 
     songs: list[str] = []
-    url = f"{SPOTIFY_API_BASE}/playlists/{resolved_id}/tracks"
-    params: dict = {"limit": 100, "market": "from_token"}
+    url = f"{SPOTIFY_API_BASE}/playlists/{resolved_id}/items"
+    params: dict = {"limit": 50, "fields": "next,items(track(name,artists(name)))"}
 
     async with httpx.AsyncClient() as client:
         while url:
@@ -262,7 +262,7 @@ async def get_playlist_tracks(
 
             data = resp.json()
             for item in data.get("items", []):
-                track = item.get("track")
+                track = item.get("track") or item.get("item")
                 if track and track.get("name"):
                     artist = ", ".join(a["name"] for a in track.get("artists", []))
                     songs.append(f"{track['name']} - {artist}")
@@ -460,24 +460,28 @@ async def debug_token_info(
                 results["first_playlist_id"] = items[0].get("id")
                 results["first_playlist_tracks"] = items[0].get("tracks", {})
 
-                # Test getting tracks from the first playlist
+                # Test getting tracks from the first playlist (using /items, not deprecated /tracks)
                 pid = items[0]["id"]
                 r2 = await client.get(
-                    f"https://api.spotify.com/v1/playlists/{pid}/tracks?limit=1&market=from_token",
+                    f"https://api.spotify.com/v1/playlists/{pid}/items?limit=1&fields=next,items(track(name,artists(name)))",
                     headers={"Authorization": f"Bearer {spotify_token}"},
                 )
-                results["playlist_tracks_status"] = r2.status_code
+                results["playlist_items_status"] = r2.status_code
                 if r2.status_code != 200:
-                    results["playlist_tracks_error"] = r2.text[:300]
+                    results["playlist_items_error"] = r2.text[:300]
                 else:
-                    results["playlist_tracks_sample"] = r2.json().get("total", "unknown")
+                    r2_data = r2.json()
+                    r2_items = r2_data.get("items", [])
+                    if r2_items:
+                        t = r2_items[0].get("track") or r2_items[0].get("item")
+                        results["first_track_name"] = t.get("name", "?") if t else "none"
 
-                # Also test without market param
+                # Also test deprecated /tracks for comparison
                 r3 = await client.get(
                     f"https://api.spotify.com/v1/playlists/{pid}/tracks?limit=1",
                     headers={"Authorization": f"Bearer {spotify_token}"},
                 )
-                results["playlist_tracks_no_market_status"] = r3.status_code
+                results["deprecated_tracks_status"] = r3.status_code
 
                 # Test the full playlist endpoint (not /tracks sub-resource)
                 r4 = await client.get(
@@ -519,21 +523,21 @@ async def debug_test_playlist(
 
     results: dict = {"playlist_id": playlist_id}
     async with httpx.AsyncClient() as client:
-        # Test /playlists/{id}/tracks
+        # Test /playlists/{id}/items (new endpoint)
         r1 = await client.get(
-            f"https://api.spotify.com/v1/playlists/{playlist_id}/tracks?limit=2",
+            f"https://api.spotify.com/v1/playlists/{playlist_id}/items?limit=2&fields=next,items(track(name,artists(name)))",
             headers={"Authorization": f"Bearer {spotify_token}"},
         )
-        results["tracks_status"] = r1.status_code
+        results["items_status"] = r1.status_code
         if r1.status_code == 200:
             data = r1.json()
-            results["tracks_total"] = data.get("total")
             items = data.get("items", [])
             if items:
-                t = items[0].get("track", {})
+                t = items[0].get("track") or items[0].get("item")
                 results["first_track"] = t.get("name", "?") if t else "none"
+            results["items_count"] = len(items)
         else:
-            results["tracks_error"] = r1.text[:300]
+            results["items_error"] = r1.text[:300]
 
         # Also get token info to check scopes
         r2 = await client.get(
