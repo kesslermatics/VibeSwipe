@@ -44,7 +44,7 @@ export default function DiscoverPage() {
     const [savingAll, setSavingAll] = useState(false);
     const [saveAllResult, setSaveAllResult] = useState<SaveResult | null>(null);
 
-    // Audio preview
+    // Audio preview — use Spotify embed as fallback
     const [playingIdx, setPlayingIdx] = useState<number | null>(null);
     const audioRef = useRef<HTMLAudioElement | null>(null);
 
@@ -83,18 +83,28 @@ export default function DiscoverPage() {
         }
     };
 
-    const togglePreview = (idx: number, url: string) => {
+    const togglePreview = (idx: number, previewUrl?: string | null) => {
+        // If already playing this song, stop it
         if (playingIdx === idx) {
-            audioRef.current?.pause();
+            if (audioRef.current) audioRef.current.pause();
             setPlayingIdx(null);
             return;
         }
+
+        // Stop any currently playing audio
         if (audioRef.current) audioRef.current.pause();
-        const audio = new Audio(url);
-        audio.volume = 0.5;
-        audio.play();
-        audio.onended = () => setPlayingIdx(null);
-        audioRef.current = audio;
+        audioRef.current = null;
+
+        // If there's a native preview_url, use it
+        if (previewUrl) {
+            const audio = new Audio(previewUrl);
+            audio.volume = 0.5;
+            audio.play();
+            audio.onended = () => setPlayingIdx(null);
+            audioRef.current = audio;
+        }
+
+        // Toggle the embed player (works even without preview_url)
         setPlayingIdx(idx);
     };
 
@@ -247,92 +257,111 @@ export default function DiscoverPage() {
                                 return (
                                     <div
                                         key={i}
-                                        className={`flex items-center gap-3 rounded-xl p-3 transition-all ${isSaved
+                                        className={`rounded-xl transition-all ${isSaved
                                                 ? "bg-green-500/10 ring-1 ring-green-500/30"
                                                 : "glass-light hover:ring-1 hover:ring-white/10"
                                             }`}
                                     >
-                                        {/* Album Art + Preview */}
-                                        <div className="relative h-14 w-14 flex-shrink-0 overflow-hidden rounded-lg bg-gray-800">
-                                            {song.album_image ? (
-                                                <img src={song.album_image} alt={song.title} className="h-full w-full object-cover" />
-                                            ) : (
-                                                <div className="flex h-full w-full items-center justify-center text-xl text-gray-600">🎵</div>
-                                            )}
-                                            {isPlaying && (
-                                                <div className="absolute bottom-0.5 left-0.5 right-0.5 flex h-1.5 items-end justify-center gap-[2px]">
-                                                    <div className="w-[3px] animate-bounce rounded-full bg-green-400" style={{ animationDelay: "0ms", height: "6px" }} />
-                                                    <div className="w-[3px] animate-bounce rounded-full bg-green-400" style={{ animationDelay: "150ms", height: "4px" }} />
-                                                    <div className="w-[3px] animate-bounce rounded-full bg-green-400" style={{ animationDelay: "300ms", height: "5px" }} />
-                                                </div>
-                                            )}
-                                        </div>
-
-                                        {/* Play/Pause button – always visible */}
-                                        {song.preview_url ? (
-                                            <button
-                                                onClick={() => togglePreview(i, song.preview_url!)}
-                                                className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full transition ${isPlaying
-                                                        ? "bg-green-500 text-gray-950"
-                                                        : "bg-white/10 text-white hover:bg-green-500 hover:text-gray-950"
-                                                    }`}
-                                            >
-                                                {isPlaying ? (
-                                                    <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 24 24">
-                                                        <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z" />
-                                                    </svg>
+                                        <div className="flex items-center gap-3 p-3">
+                                            {/* Album Art */}
+                                            <div className="relative h-14 w-14 flex-shrink-0 overflow-hidden rounded-lg bg-gray-800">
+                                                {song.album_image ? (
+                                                    <img src={song.album_image} alt={song.title} className="h-full w-full object-cover" />
                                                 ) : (
-                                                    <svg className="h-4 w-4 ml-0.5" fill="currentColor" viewBox="0 0 24 24">
-                                                        <path d="M8 5v14l11-7z" />
-                                                    </svg>
+                                                    <div className="flex h-full w-full items-center justify-center text-xl text-gray-600">🎵</div>
                                                 )}
-                                            </button>
-                                        ) : (
-                                            <div className="h-9 w-9 flex-shrink-0" />
-                                        )}
-
-                                        {/* Song Info */}
-                                        <div className="min-w-0 flex-1">
-                                            <p className="truncate text-sm font-medium text-gray-100">{song.title}</p>
-                                            <p className="truncate text-xs text-gray-400">{song.artist}</p>
-                                        </div>
-
-                                        {/* Actions */}
-                                        <div className="flex flex-shrink-0 items-center gap-1">
-                                            {/* Save to Liked Songs */}
-                                            <button
-                                                onClick={() => saveSingleSong(i)}
-                                                disabled={isSaved || isSaving || !song.spotify_uri}
-                                                className={`rounded-lg p-2 transition ${isSaved
-                                                        ? "text-green-400"
-                                                        : "text-gray-500 hover:bg-green-500/10 hover:text-green-400"
-                                                    } disabled:cursor-default`}
-                                                title={isSaved ? "Gespeichert ✓" : "Zu Lieblingssongs hinzufügen"}
-                                            >
-                                                {isSaving ? (
-                                                    <div className="h-4 w-4 animate-spin rounded-full border-2 border-green-400 border-t-transparent" />
-                                                ) : (
-                                                    <svg className="h-5 w-5" fill={isSaved ? "currentColor" : "none"} viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                                        <path strokeLinecap="round" strokeLinejoin="round" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
-                                                    </svg>
+                                                {isPlaying && (
+                                                    <div className="absolute bottom-0.5 left-0.5 right-0.5 flex h-1.5 items-end justify-center gap-[2px]">
+                                                        <div className="w-[3px] animate-bounce rounded-full bg-green-400" style={{ animationDelay: "0ms", height: "6px" }} />
+                                                        <div className="w-[3px] animate-bounce rounded-full bg-green-400" style={{ animationDelay: "150ms", height: "4px" }} />
+                                                        <div className="w-[3px] animate-bounce rounded-full bg-green-400" style={{ animationDelay: "300ms", height: "5px" }} />
+                                                    </div>
                                                 )}
-                                            </button>
+                                            </div>
 
-                                            {/* Open in Spotify */}
-                                            {song.spotify_url && (
-                                                <a
-                                                    href={song.spotify_url}
-                                                    target="_blank"
-                                                    rel="noopener noreferrer"
-                                                    className="rounded-lg p-2 text-gray-500 transition hover:bg-green-500/10 hover:text-green-400"
-                                                    title="Auf Spotify öffnen"
+                                            {/* Play/Pause button – always visible if we have a spotify_uri */}
+                                            {song.spotify_uri ? (
+                                                <button
+                                                    onClick={() => togglePreview(i, song.preview_url)}
+                                                    className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full transition ${isPlaying
+                                                            ? "bg-green-500 text-gray-950"
+                                                            : "bg-white/10 text-white hover:bg-green-500 hover:text-gray-950"
+                                                        }`}
+                                                    title={isPlaying ? "Pause" : "Anhören"}
                                                 >
-                                                    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
-                                                        <path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z" />
-                                                    </svg>
-                                                </a>
+                                                    {isPlaying ? (
+                                                        <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 24 24">
+                                                            <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z" />
+                                                        </svg>
+                                                    ) : (
+                                                        <svg className="h-4 w-4 ml-0.5" fill="currentColor" viewBox="0 0 24 24">
+                                                            <path d="M8 5v14l11-7z" />
+                                                        </svg>
+                                                    )}
+                                                </button>
+                                            ) : (
+                                                <div className="h-9 w-9 flex-shrink-0" />
                                             )}
+
+                                            {/* Song Info */}
+                                            <div className="min-w-0 flex-1">
+                                                <p className="truncate text-sm font-medium text-gray-100">{song.title}</p>
+                                                <p className="truncate text-xs text-gray-400">{song.artist}</p>
+                                            </div>
+
+                                            {/* Actions */}
+                                            <div className="flex flex-shrink-0 items-center gap-1">
+                                                {/* Save to Liked Songs */}
+                                                <button
+                                                    onClick={() => saveSingleSong(i)}
+                                                    disabled={isSaved || isSaving || !song.spotify_uri}
+                                                    className={`rounded-lg p-2 transition ${isSaved
+                                                            ? "text-green-400"
+                                                            : "text-gray-500 hover:bg-green-500/10 hover:text-green-400"
+                                                        } disabled:cursor-default`}
+                                                    title={isSaved ? "Gespeichert ✓" : "Zu Lieblingssongs hinzufügen"}
+                                                >
+                                                    {isSaving ? (
+                                                        <div className="h-4 w-4 animate-spin rounded-full border-2 border-green-400 border-t-transparent" />
+                                                    ) : (
+                                                        <svg className="h-5 w-5" fill={isSaved ? "currentColor" : "none"} viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                                            <path strokeLinecap="round" strokeLinejoin="round" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
+                                                        </svg>
+                                                    )}
+                                                </button>
+
+                                                {/* Open in Spotify */}
+                                                {song.spotify_url && (
+                                                    <a
+                                                        href={song.spotify_url}
+                                                        target="_blank"
+                                                        rel="noopener noreferrer"
+                                                        className="rounded-lg p-2 text-gray-500 transition hover:bg-green-500/10 hover:text-green-400"
+                                                        title="Auf Spotify öffnen"
+                                                    >
+                                                        <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
+                                                            <path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z" />
+                                                        </svg>
+                                                    </a>
+                                                )}
+                                            </div>
                                         </div>
+
+                                        {/* Spotify Embed Player – shown when playing */}
+                                        {isPlaying && song.spotify_uri && (
+                                            <div className="px-3 pb-3">
+                                                <iframe
+                                                    src={`https://open.spotify.com/embed/track/${extractTrackId(song.spotify_uri)}?utm_source=generator&theme=0`}
+                                                    width="100%"
+                                                    height="80"
+                                                    frameBorder="0"
+                                                    allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
+                                                    loading="lazy"
+                                                    className="rounded-lg"
+                                                    style={{ borderRadius: "12px" }}
+                                                />
+                                            </div>
+                                        )}
                                     </div>
                                 );
                             })}

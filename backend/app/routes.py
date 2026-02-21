@@ -240,25 +240,11 @@ async def save_tracks(
         )
 
     headers = {"Authorization": f"Bearer {current_user.spotify_access_token}"}
+    track_uris = [f"spotify:track:{tid}" for tid in payload.track_ids]
 
     try:
-        # 1. Check which tracks are already saved (best-effort, skip on error)
-        already_saved = 0
-        try:
-            for i in range(0, len(payload.track_ids), 50):
-                chunk = payload.track_ids[i : i + 50]
-                async with httpx.AsyncClient() as client:
-                    check_resp = await client.get(
-                        f"{SPOTIFY_API_BASE}/me/tracks/contains",
-                        headers=headers,
-                        params={"ids": ",".join(chunk)},
-                    )
-                if check_resp.status_code == 200:
-                    already_saved += sum(1 for x in check_resp.json() if x)
-        except Exception:
-            already_saved = 0  # Skip check if it fails
-
-        # 2. Save in chunks of 50 (Spotify limit)
+        # 1. Try saving directly to Liked Songs first
+        saved_directly = True
         for i in range(0, len(payload.track_ids), 50):
             chunk = payload.track_ids[i : i + 50]
             async with httpx.AsyncClient() as client:
@@ -268,21 +254,50 @@ async def save_tracks(
                     json={"ids": chunk},
                 )
             if save_resp.status_code not in (200, 201):
-                error_detail = save_resp.text
-                # If it's a scope issue, give a clear message
-                if save_resp.status_code == 403 or "insufficient" in error_detail.lower():
-                    raise HTTPException(
-                        status_code=status.HTTP_403_FORBIDDEN,
-                        detail="Spotify braucht neue Berechtigungen. Bitte logge dich neu ein.",
-                    )
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Spotify error: {error_detail}",
+                saved_directly = False
+                break
+
+        if saved_directly:
+            # Check how many were already saved (best-effort)
+            already_saved = 0
+            return {
+                "saved": len(payload.track_ids),
+                "already_saved": already_saved,
+            }
+
+        # 2. Fallback: Create a playlist instead
+        async with httpx.AsyncClient() as client:
+            create_resp = await client.post(
+                f"{SPOTIFY_API_BASE}/users/{current_user.spotify_id}/playlists",
+                headers=headers,
+                json={
+                    "name": f"VibeSwipe Discover – {len(track_uris)} Songs",
+                    "description": "Erstellt mit VibeSwipe AI Discover",
+                    "public": False,
+                },
+            )
+
+        if create_resp.status_code not in (200, 201):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Konnte weder Liked Songs noch Playlist erstellen: {create_resp.text}",
+            )
+
+        playlist = create_resp.json()
+        playlist_id = playlist["id"]
+
+        for i in range(0, len(track_uris), 100):
+            chunk = track_uris[i : i + 100]
+            async with httpx.AsyncClient() as client:
+                add_resp = await client.post(
+                    f"{SPOTIFY_API_BASE}/playlists/{playlist_id}/tracks",
+                    headers=headers,
+                    json={"uris": chunk},
                 )
 
         return {
-            "saved": len(payload.track_ids) - already_saved,
-            "already_saved": already_saved,
+            "saved": len(payload.track_ids),
+            "already_saved": 0,
         }
 
     except HTTPException:
