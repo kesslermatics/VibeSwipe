@@ -7,11 +7,12 @@ export default function LoginPage() {
     const handleSpotifyLogin = async () => {
         setLoading(true);
         try {
-            const redirectUri = `${window.location.origin}/callback`;
+            // Normalize localhost → 127.0.0.1 (Spotify requires http://127.0.0.1 for local dev)
+            const origin = window.location.origin.replace("://localhost:", "://127.0.0.1:");
+            const redirectUri = `${origin}/callback`;
             const data = await api<{ url: string; redirect_uri: string }>(
                 `/auth/login?redirect_uri=${encodeURIComponent(redirectUri)}`
             );
-            // Store the redirect_uri the backend resolved so the callback page uses the same one
             sessionStorage.setItem("spotify_redirect_uri", data.redirect_uri);
             window.location.href = data.url;
         } catch {
