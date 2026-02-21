@@ -55,3 +55,13 @@ class CreatePlaylistResponse(BaseModel):
     playlist_id: str
     name: str
     total_tracks: int
+
+
+# ── Save Tracks (Lieblingssongs) ──────────────────────
+class SaveTracksRequest(BaseModel):
+    track_ids: list[str]  # Spotify track IDs (not URIs)
+
+
+class SaveTracksResponse(BaseModel):
+    saved: int
+    already_saved: int

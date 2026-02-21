@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.database import get_db
 from app.models import User
-from app.schemas import SpotifyCallback, Token, UserResponse, MessageResponse, DiscoverRequest, DiscoverResponse, CreatePlaylistRequest, CreatePlaylistResponse
+from app.schemas import SpotifyCallback, Token, UserResponse, MessageResponse, DiscoverRequest, DiscoverResponse, CreatePlaylistRequest, CreatePlaylistResponse, SaveTracksRequest, SaveTracksResponse
 from app.auth import create_access_token, get_current_user
 from app.discover import discover_songs
 
@@ -17,7 +17,7 @@ settings = get_settings()
 SPOTIFY_AUTH_URL = "https://accounts.spotify.com/authorize"
 SPOTIFY_TOKEN_URL = "https://accounts.spotify.com/api/token"
 SPOTIFY_ME_URL = "https://api.spotify.com/v1/me"
-SPOTIFY_SCOPES = "user-read-email user-read-private user-top-read user-library-read playlist-modify-public playlist-modify-private"
+SPOTIFY_SCOPES = "user-read-email user-read-private user-top-read user-library-read user-library-modify playlist-modify-public playlist-modify-private"
 
 
 def _normalize_uri(uri: str) -> str:
@@ -224,6 +224,61 @@ async def create_playlist(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Playlist creation failed: {str(e)}",
+        )
+
+
+# ── Save tracks to Liked Songs ───────────────────────
+@router.post("/save-tracks", response_model=SaveTracksResponse)
+async def save_tracks(
+    payload: SaveTracksRequest,
+    current_user: User = Depends(get_current_user),
+):
+    if not current_user.spotify_access_token:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No Spotify access token found. Please re-login.",
+        )
+
+    headers = {"Authorization": f"Bearer {current_user.spotify_access_token}"}
+
+    try:
+        # 1. Check which tracks are already saved
+        already_saved = 0
+        async with httpx.AsyncClient() as client:
+            check_resp = await client.get(
+                f"{SPOTIFY_API_BASE}/me/tracks/contains",
+                headers=headers,
+                params={"ids": ",".join(payload.track_ids)},
+            )
+        if check_resp.status_code == 200:
+            already_saved = sum(1 for x in check_resp.json() if x)
+
+        # 2. Save in chunks of 50 (Spotify limit)
+        for i in range(0, len(payload.track_ids), 50):
+            chunk = payload.track_ids[i : i + 50]
+            async with httpx.AsyncClient() as client:
+                save_resp = await client.put(
+                    f"{SPOTIFY_API_BASE}/me/tracks",
+                    headers=headers,
+                    json={"ids": chunk},
+                )
+            if save_resp.status_code not in (200, 201):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Failed to save tracks: {save_resp.text}",
+                )
+
+        return {
+            "saved": len(payload.track_ids) - already_saved,
+            "already_saved": already_saved,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Saving tracks failed: {str(e)}",
         )
 
 

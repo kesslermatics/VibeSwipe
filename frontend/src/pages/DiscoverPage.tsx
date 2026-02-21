@@ -16,11 +16,16 @@ interface DiscoverResult {
     mood_summary: string;
 }
 
-interface PlaylistResult {
-    playlist_url: string;
-    playlist_id: string;
-    name: string;
-    total_tracks: number;
+interface SaveResult {
+    saved: number;
+    already_saved: number;
+}
+
+function extractTrackId(uri: string | null): string | null {
+    if (!uri) return null;
+    // spotify:track:1234abc → 1234abc
+    const parts = uri.split(":");
+    return parts.length === 3 ? parts[2] : null;
 }
 
 export default function DiscoverPage() {
@@ -31,19 +36,18 @@ export default function DiscoverPage() {
     const [result, setResult] = useState<DiscoverResult | null>(null);
     const [error, setError] = useState("");
 
-    // Like/dislike state
-    const [liked, setLiked] = useState<Set<number>>(new Set());
-    const [dismissed, setDismissed] = useState<Set<number>>(new Set());
+    // Per-song saved state
+    const [savedSongs, setSavedSongs] = useState<Set<number>>(new Set());
+    const [savingIdx, setSavingIdx] = useState<number | null>(null);
+
+    // Save all
+    const [savingAll, setSavingAll] = useState(false);
+    const [saveAllResult, setSaveAllResult] = useState<SaveResult | null>(null);
 
     // Audio preview
     const [playingIdx, setPlayingIdx] = useState<number | null>(null);
     const audioRef = useRef<HTMLAudioElement | null>(null);
 
-    // Playlist creation
-    const [creatingPlaylist, setCreatingPlaylist] = useState(false);
-    const [playlistResult, setPlaylistResult] = useState<PlaylistResult | null>(null);
-
-    // Cleanup audio on unmount
     useEffect(() => {
         return () => {
             if (audioRef.current) {
@@ -59,9 +63,8 @@ export default function DiscoverPage() {
 
         setError("");
         setResult(null);
-        setLiked(new Set());
-        setDismissed(new Set());
-        setPlaylistResult(null);
+        setSavedSongs(new Set());
+        setSaveAllResult(null);
         setPlayingIdx(null);
         if (audioRef.current) audioRef.current.pause();
         setLoading(true);
@@ -80,51 +83,12 @@ export default function DiscoverPage() {
         }
     };
 
-    const toggleLike = (idx: number) => {
-        setLiked((prev) => {
-            const next = new Set(prev);
-            if (next.has(idx)) {
-                next.delete(idx);
-            } else {
-                next.add(idx);
-                // Remove from dismissed if it was there
-                setDismissed((d) => {
-                    const nd = new Set(d);
-                    nd.delete(idx);
-                    return nd;
-                });
-            }
-            return next;
-        });
-    };
-
-    const toggleDismiss = (idx: number) => {
-        setDismissed((prev) => {
-            const next = new Set(prev);
-            if (next.has(idx)) {
-                next.delete(idx);
-            } else {
-                next.add(idx);
-                // Remove from liked if it was there
-                setLiked((l) => {
-                    const nl = new Set(l);
-                    nl.delete(idx);
-                    return nl;
-                });
-            }
-            return next;
-        });
-    };
-
     const togglePreview = (idx: number, url: string) => {
         if (playingIdx === idx) {
-            // Stop
             audioRef.current?.pause();
             setPlayingIdx(null);
             return;
         }
-
-        // Play new
         if (audioRef.current) audioRef.current.pause();
         const audio = new Audio(url);
         audio.volume = 0.5;
@@ -134,43 +98,57 @@ export default function DiscoverPage() {
         setPlayingIdx(idx);
     };
 
-    const handleCreatePlaylist = async () => {
-        if (!result) return;
-        const likedSongs = result.songs.filter((_, i) => liked.has(i));
-        const uris = likedSongs
-            .map((s) => s.spotify_uri)
-            .filter((u): u is string => !!u);
+    const saveSingleSong = async (idx: number) => {
+        if (!result || savedSongs.has(idx)) return;
+        const song = result.songs[idx];
+        const trackId = extractTrackId(song.spotify_uri);
+        if (!trackId) return;
 
-        if (uris.length === 0) {
-            setError("Wähle mindestens einen Song aus!");
-            return;
-        }
-
-        setCreatingPlaylist(true);
-        setError("");
-
+        setSavingIdx(idx);
         try {
-            const data = await api<PlaylistResult>("/create-playlist", {
+            await api<SaveResult>("/save-tracks", {
                 method: "POST",
-                body: {
-                    name: `VibeSwipe – ${result.mood_summary.slice(0, 50)}`,
-                    description: `Erstellt mit VibeSwipe AI Discover: "${prompt}"`,
-                    track_uris: uris,
-                },
+                body: { track_ids: [trackId] },
                 token: token || "",
             });
-            setPlaylistResult(data);
+            setSavedSongs((prev) => new Set(prev).add(idx));
         } catch (err: unknown) {
-            setError(err instanceof Error ? err.message : "Playlist konnte nicht erstellt werden");
+            setError(err instanceof Error ? err.message : "Song konnte nicht gespeichert werden");
         } finally {
-            setCreatingPlaylist(false);
+            setSavingIdx(null);
         }
     };
 
-    const likedCount = liked.size;
+    const saveAllSongs = async () => {
+        if (!result) return;
+        const trackIds = result.songs
+            .map((s) => extractTrackId(s.spotify_uri))
+            .filter((id): id is string => !!id);
+
+        if (trackIds.length === 0) return;
+
+        setSavingAll(true);
+        setError("");
+        try {
+            const data = await api<SaveResult>("/save-tracks", {
+                method: "POST",
+                body: { track_ids: trackIds },
+                token: token || "",
+            });
+            setSaveAllResult(data);
+            // Mark all as saved
+            const allIdx = new Set<number>();
+            result.songs.forEach((_, i) => allIdx.add(i));
+            setSavedSongs(allIdx);
+        } catch (err: unknown) {
+            setError(err instanceof Error ? err.message : "Songs konnten nicht gespeichert werden");
+        } finally {
+            setSavingAll(false);
+        }
+    };
 
     return (
-        <div className="min-h-screen px-4 py-8">
+        <div className="min-h-screen px-4 py-8 pb-24">
             <div className="mx-auto max-w-2xl">
                 {/* Header */}
                 <div className="mb-8 flex items-center gap-4">
@@ -201,9 +179,7 @@ export default function DiscoverPage() {
                             className="w-full resize-none bg-transparent text-sm text-gray-100 placeholder-gray-500 outline-none"
                         />
                         <div className="mt-3 flex items-center justify-between">
-                            <p className="text-xs text-gray-500">
-                                Powered by Gemini AI + Spotify
-                            </p>
+                            <p className="text-xs text-gray-500">Powered by Gemini AI + Spotify</p>
                             <button
                                 type="submit"
                                 disabled={loading || !prompt.trim()}
@@ -234,23 +210,20 @@ export default function DiscoverPage() {
                     </div>
                 )}
 
-                {/* Playlist created success */}
-                {playlistResult && (
+                {/* Save all result */}
+                {saveAllResult && (
                     <div className="mb-6 rounded-xl bg-green-500/10 p-4 ring-1 ring-green-500/20">
                         <div className="flex items-center gap-3">
-                            <span className="text-2xl">🎉</span>
+                            <span className="text-2xl">💚</span>
                             <div>
                                 <p className="text-sm font-semibold text-green-400">
-                                    Playlist erstellt! ({playlistResult.total_tracks} Songs)
+                                    {saveAllResult.saved} neue Songs in deinen Lieblingssongs gespeichert!
                                 </p>
-                                <a
-                                    href={playlistResult.playlist_url}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="text-xs text-green-500 underline underline-offset-2 hover:text-green-300"
-                                >
-                                    Auf Spotify öffnen →
-                                </a>
+                                {saveAllResult.already_saved > 0 && (
+                                    <p className="text-xs text-gray-400">
+                                        {saveAllResult.already_saved} waren schon drin
+                                    </p>
+                                )}
                             </div>
                         </div>
                     </div>
@@ -264,65 +237,29 @@ export default function DiscoverPage() {
                             🎯 {result.mood_summary}
                         </div>
 
-                        {/* Liked counter + Create Playlist button */}
-                        <div className="mb-4 flex items-center justify-between">
-                            <p className="text-sm text-gray-400">
-                                <span className="font-semibold text-green-400">{likedCount}</span> Songs ausgewählt
-                            </p>
-                            {likedCount > 0 && !playlistResult && (
-                                <button
-                                    onClick={handleCreatePlaylist}
-                                    disabled={creatingPlaylist}
-                                    className="flex items-center gap-2 rounded-xl bg-green-500 px-4 py-2 text-sm font-semibold text-gray-950 transition hover:bg-green-400 disabled:opacity-50"
-                                >
-                                    {creatingPlaylist ? (
-                                        <>
-                                            <div className="h-4 w-4 animate-spin rounded-full border-2 border-gray-950 border-t-transparent" />
-                                            Erstelle…
-                                        </>
-                                    ) : (
-                                        <>
-                                            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-                                            </svg>
-                                            Playlist erstellen
-                                        </>
-                                    )}
-                                </button>
-                            )}
-                        </div>
-
                         {/* Song List */}
                         <div className="space-y-2">
                             {result.songs.map((song, i) => {
-                                const isLiked = liked.has(i);
-                                const isDismissed = dismissed.has(i);
+                                const isSaved = savedSongs.has(i);
+                                const isSaving = savingIdx === i;
                                 const isPlaying = playingIdx === i;
 
                                 return (
                                     <div
                                         key={i}
-                                        className={`flex items-center gap-3 rounded-xl p-3 transition-all ${isLiked
+                                        className={`flex items-center gap-3 rounded-xl p-3 transition-all ${
+                                            isSaved
                                                 ? "bg-green-500/10 ring-1 ring-green-500/30"
-                                                : isDismissed
-                                                    ? "bg-gray-900/50 opacity-40"
-                                                    : "glass-light hover:ring-1 hover:ring-white/10"
-                                            }`}
+                                                : "glass-light hover:ring-1 hover:ring-white/10"
+                                        }`}
                                     >
-                                        {/* Album Art + Preview overlay */}
+                                        {/* Album Art + Preview */}
                                         <div className="relative h-14 w-14 flex-shrink-0 overflow-hidden rounded-lg bg-gray-800">
                                             {song.album_image ? (
-                                                <img
-                                                    src={song.album_image}
-                                                    alt={song.title}
-                                                    className="h-full w-full object-cover"
-                                                />
+                                                <img src={song.album_image} alt={song.title} className="h-full w-full object-cover" />
                                             ) : (
-                                                <div className="flex h-full w-full items-center justify-center text-xl text-gray-600">
-                                                    🎵
-                                                </div>
+                                                <div className="flex h-full w-full items-center justify-center text-xl text-gray-600">🎵</div>
                                             )}
-                                            {/* Preview play/pause overlay */}
                                             {song.preview_url && (
                                                 <button
                                                     onClick={() => togglePreview(i, song.preview_url!)}
@@ -339,7 +276,6 @@ export default function DiscoverPage() {
                                                     )}
                                                 </button>
                                             )}
-                                            {/* Playing indicator */}
                                             {isPlaying && (
                                                 <div className="absolute bottom-0.5 left-0.5 right-0.5 flex h-1.5 items-end justify-center gap-[2px]">
                                                     <div className="w-[3px] animate-bounce rounded-full bg-green-400" style={{ animationDelay: "0ms", height: "6px" }} />
@@ -351,45 +287,33 @@ export default function DiscoverPage() {
 
                                         {/* Song Info */}
                                         <div className="min-w-0 flex-1">
-                                            <p className="truncate text-sm font-medium text-gray-100">
-                                                {song.title}
-                                            </p>
-                                            <p className="truncate text-xs text-gray-400">
-                                                {song.artist}
-                                            </p>
+                                            <p className="truncate text-sm font-medium text-gray-100">{song.title}</p>
+                                            <p className="truncate text-xs text-gray-400">{song.artist}</p>
                                         </div>
 
-                                        {/* Action buttons */}
+                                        {/* Actions */}
                                         <div className="flex flex-shrink-0 items-center gap-1">
-                                            {/* Dislike */}
+                                            {/* Save to Liked Songs */}
                                             <button
-                                                onClick={() => toggleDismiss(i)}
-                                                className={`rounded-lg p-2 transition ${isDismissed
-                                                        ? "bg-red-500/20 text-red-400"
-                                                        : "text-gray-500 hover:bg-red-500/10 hover:text-red-400"
-                                                    }`}
-                                                title="Mag ich nicht"
-                                            >
-                                                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                                                </svg>
-                                            </button>
-
-                                            {/* Like */}
-                                            <button
-                                                onClick={() => toggleLike(i)}
-                                                className={`rounded-lg p-2 transition ${isLiked
-                                                        ? "bg-green-500/20 text-green-400"
+                                                onClick={() => saveSingleSong(i)}
+                                                disabled={isSaved || isSaving || !song.spotify_uri}
+                                                className={`rounded-lg p-2 transition ${
+                                                    isSaved
+                                                        ? "text-green-400"
                                                         : "text-gray-500 hover:bg-green-500/10 hover:text-green-400"
-                                                    }`}
-                                                title="Mag ich"
+                                                } disabled:cursor-default`}
+                                                title={isSaved ? "Gespeichert ✓" : "Zu Lieblingssongs hinzufügen"}
                                             >
-                                                <svg className="h-4 w-4" fill={isLiked ? "currentColor" : "none"} viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
-                                                </svg>
+                                                {isSaving ? (
+                                                    <div className="h-4 w-4 animate-spin rounded-full border-2 border-green-400 border-t-transparent" />
+                                                ) : (
+                                                    <svg className="h-5 w-5" fill={isSaved ? "currentColor" : "none"} viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                                        <path strokeLinecap="round" strokeLinejoin="round" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
+                                                    </svg>
+                                                )}
                                             </button>
 
-                                            {/* Spotify Link */}
+                                            {/* Open in Spotify */}
                                             {song.spotify_url && (
                                                 <a
                                                     href={song.spotify_url}
@@ -421,34 +345,31 @@ export default function DiscoverPage() {
                                     <div className="h-4 w-3/4 rounded bg-gray-700" />
                                     <div className="h-3 w-1/2 rounded bg-gray-700" />
                                 </div>
-                                <div className="flex gap-1">
-                                    <div className="h-8 w-8 rounded-lg bg-gray-700" />
-                                    <div className="h-8 w-8 rounded-lg bg-gray-700" />
-                                </div>
+                                <div className="h-8 w-8 rounded-lg bg-gray-700" />
                             </div>
                         ))}
                     </div>
                 )}
 
-                {/* Sticky bottom bar when songs are liked */}
-                {result && likedCount > 0 && !playlistResult && (
+                {/* Sticky bottom bar: Save all */}
+                {result && !saveAllResult && (
                     <div className="fixed inset-x-0 bottom-0 z-50 border-t border-white/5 bg-gray-950/90 px-4 py-3 backdrop-blur-xl">
                         <div className="mx-auto flex max-w-2xl items-center justify-between">
                             <p className="text-sm text-gray-300">
-                                <span className="font-bold text-green-400">{likedCount}</span> Song{likedCount !== 1 && "s"} ausgewählt
+                                <span className="font-bold text-green-400">{result.songs.filter((s) => s.spotify_uri).length}</span> Songs gefunden
                             </p>
                             <button
-                                onClick={handleCreatePlaylist}
-                                disabled={creatingPlaylist}
+                                onClick={saveAllSongs}
+                                disabled={savingAll}
                                 className="flex items-center gap-2 rounded-xl bg-green-500 px-5 py-2.5 text-sm font-bold text-gray-950 transition hover:bg-green-400 disabled:opacity-50"
                             >
-                                {creatingPlaylist ? (
+                                {savingAll ? (
                                     <>
                                         <div className="h-4 w-4 animate-spin rounded-full border-2 border-gray-950 border-t-transparent" />
-                                        Erstelle…
+                                        Speichere…
                                     </>
                                 ) : (
-                                    "🎶 Playlist erstellen"
+                                    "💚 Alle in Lieblingssongs"
                                 )}
                             </button>
                         </div>
