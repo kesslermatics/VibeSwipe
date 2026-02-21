@@ -8,7 +8,11 @@ export default function LoginPage() {
         setLoading(true);
         try {
             const redirectUri = `${window.location.origin}/callback`;
-            const data = await api<{ url: string }>(`/auth/login?redirect_uri=${encodeURIComponent(redirectUri)}`);
+            const data = await api<{ url: string; redirect_uri: string }>(
+                `/auth/login?redirect_uri=${encodeURIComponent(redirectUri)}`
+            );
+            // Store the redirect_uri the backend resolved so the callback page uses the same one
+            sessionStorage.setItem("spotify_redirect_uri", data.redirect_uri);
             window.location.href = data.url;
         } catch {
             setLoading(false);

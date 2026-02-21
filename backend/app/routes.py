@@ -23,9 +23,17 @@ SPOTIFY_SCOPES = "user-read-email user-read-private user-top-read user-library-r
 @router.get("/auth/login")
 def spotify_login(redirect_uri: str | None = None):
     """Returns the Spotify authorization URL the frontend should redirect to."""
-    # Use the provided redirect_uri if it's in the allowed list, otherwise default to first
     allowed = settings.spotify_redirect_uris
-    uri = redirect_uri if redirect_uri in allowed else allowed[0]
+
+    # Match by origin: localhost/127.0.0.1 → dev redirect, otherwise → prod redirect
+    uri = allowed[0]  # default: first (dev)
+    if redirect_uri:
+        # Normalize localhost ↔ 127.0.0.1
+        normalized = redirect_uri.replace("://localhost:", "://127.0.0.1:")
+        for a in allowed:
+            if a == redirect_uri or a == normalized:
+                uri = a
+                break
 
     params = {
         "client_id": settings.spotify_client_id,
@@ -34,7 +42,7 @@ def spotify_login(redirect_uri: str | None = None):
         "scope": SPOTIFY_SCOPES,
         "show_dialog": "true",
     }
-    return {"url": f"{SPOTIFY_AUTH_URL}?{urlencode(params)}"}
+    return {"url": f"{SPOTIFY_AUTH_URL}?{urlencode(params)}", "redirect_uri": uri}
 
 
 # ── Spotify OAuth: Exchange code for tokens ───────────
@@ -42,13 +50,18 @@ def spotify_login(redirect_uri: str | None = None):
 async def spotify_callback(payload: SpotifyCallback, db: Session = Depends(get_db)):
     """Exchange the Spotify auth code for tokens, create/update user, return JWT."""
 
-    # Validate redirect_uri
+    # Validate redirect_uri (normalize localhost ↔ 127.0.0.1)
     allowed = settings.spotify_redirect_uris
-    if payload.redirect_uri not in allowed:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid redirect_uri",
-        )
+    resolved_uri = payload.redirect_uri
+    if resolved_uri not in allowed:
+        normalized = resolved_uri.replace("://localhost:", "://127.0.0.1:")
+        if normalized in allowed:
+            resolved_uri = normalized
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid redirect_uri",
+            )
 
     # 1. Exchange code for Spotify access & refresh tokens
     async with httpx.AsyncClient() as client:
@@ -57,7 +70,7 @@ async def spotify_callback(payload: SpotifyCallback, db: Session = Depends(get_d
             data={
                 "grant_type": "authorization_code",
                 "code": payload.code,
-                "redirect_uri": payload.redirect_uri,
+                "redirect_uri": resolved_uri,
                 "client_id": settings.spotify_client_id,
                 "client_secret": settings.spotify_client_secret,
             },

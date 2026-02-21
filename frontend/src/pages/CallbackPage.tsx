@@ -22,7 +22,10 @@ export default function CallbackPage() {
         }
 
         // Exchange the code for our JWT
-        const redirectUri = `${window.location.origin}/callback`;
+        // Use the redirect_uri that was resolved by the backend during login
+        const redirectUri =
+            sessionStorage.getItem("spotify_redirect_uri") ||
+            `${window.location.origin}/callback`;
         api<{ access_token: string }>("/auth/callback", {
             method: "POST",
             body: { code, redirect_uri: redirectUri },
