@@ -285,7 +285,7 @@ export default function DiscoverPage({ onLogout: _onLogout }: { onLogout: () => 
                                                     </div>
                                                     <div className="min-w-0 flex-1">
                                                         <p className="truncate text-xs font-medium text-gray-200">{pl.name}</p>
-                                                        <p className="text-[10px] text-gray-500">{pl.total_tracks} Songs · {pl.owner}</p>
+                                                        <p className="text-[10px] text-gray-500">{pl.total_tracks > 0 ? `${pl.total_tracks} Songs · ` : ""}{pl.owner}</p>
                                                     </div>
                                                 </button>
                                             ))}
