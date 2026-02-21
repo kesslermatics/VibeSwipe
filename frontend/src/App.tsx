@@ -1,11 +1,20 @@
-import { Routes, Route, Navigate } from "react-router-dom";
+import { useState, useCallback } from "react";
+import { Routes, Route, Navigate, useNavigate } from "react-router-dom";
 import LoginPage from "./pages/LoginPage";
 import CallbackPage from "./pages/CallbackPage";
 import HomePage from "./pages/HomePage";
 import DiscoverPage from "./pages/DiscoverPage";
 
 function App() {
-  const isLoggedIn = !!localStorage.getItem("token");
+  const [isLoggedIn, setIsLoggedIn] = useState(!!localStorage.getItem("token"));
+  const navigate = useNavigate();
+
+  const logout = useCallback(() => {
+    localStorage.removeItem("token");
+    sessionStorage.removeItem("spotify_redirect_uri");
+    setIsLoggedIn(false);
+    navigate("/login", { replace: true });
+  }, [navigate]);
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-gray-950">
@@ -18,8 +27,8 @@ function App() {
       <Routes>
         <Route path="/login" element={isLoggedIn ? <Navigate to="/" replace /> : <LoginPage />} />
         <Route path="/callback" element={<CallbackPage />} />
-        <Route path="/" element={isLoggedIn ? <HomePage /> : <Navigate to="/login" replace />} />
-        <Route path="/discover" element={isLoggedIn ? <DiscoverPage /> : <Navigate to="/login" replace />} />
+        <Route path="/" element={isLoggedIn ? <HomePage onLogout={logout} /> : <Navigate to="/login" replace />} />
+        <Route path="/discover" element={isLoggedIn ? <DiscoverPage onLogout={logout} /> : <Navigate to="/login" replace />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </div>

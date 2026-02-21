@@ -8,7 +8,7 @@ from app.config import get_settings
 from app.database import get_db
 from app.models import User
 from app.schemas import SpotifyCallback, Token, UserResponse, MessageResponse, DiscoverRequest, DiscoverResponse, CreatePlaylistRequest, CreatePlaylistResponse, SaveTracksRequest, SaveTracksResponse
-from app.auth import create_access_token, get_current_user
+from app.auth import create_access_token, get_current_user, get_valid_spotify_token
 from app.discover import discover_songs
 
 router = APIRouter()
@@ -140,17 +140,14 @@ def get_me(current_user: User = Depends(get_current_user)):
 async def discover(
     payload: DiscoverRequest,
     current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
-    if not current_user.spotify_access_token:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No Spotify access token found. Please re-login.",
-        )
+    spotify_token = await get_valid_spotify_token(current_user, db)
 
     try:
         result = await discover_songs(
             payload.prompt,
-            current_user.spotify_access_token,
+            spotify_token,
             context_songs=payload.context_songs or None,
         )
         return result
@@ -168,10 +165,10 @@ SPOTIFY_API_BASE = "https://api.spotify.com/v1"
 @router.get("/my-playlists")
 async def get_my_playlists(
     current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
     """Return all playlists belonging to the current user."""
-    if not current_user.spotify_access_token:
-        raise HTTPException(status_code=400, detail="No Spotify token.")
+    spotify_token = await get_valid_spotify_token(current_user, db)
 
     playlists: list[dict] = []
     url = f"{SPOTIFY_API_BASE}/me/playlists"
@@ -182,7 +179,7 @@ async def get_my_playlists(
             resp = await client.get(
                 url,
                 params=params,
-                headers={"Authorization": f"Bearer {current_user.spotify_access_token}"},
+                headers={"Authorization": f"Bearer {spotify_token}"},
             )
             if resp.status_code != 200:
                 raise HTTPException(status_code=resp.status_code, detail="Playlists konnten nicht geladen werden.")
@@ -211,10 +208,10 @@ async def get_playlist_tracks(
     playlist_id: str | None = None,
     playlist_url: str | None = None,
     current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
     """Extract track names from a Spotify playlist URL or ID."""
-    if not current_user.spotify_access_token:
-        raise HTTPException(status_code=400, detail="No Spotify token.")
+    spotify_token = await get_valid_spotify_token(current_user, db)
 
     # Resolve the playlist ID from whichever param was provided
     resolved_id = playlist_id
@@ -237,7 +234,7 @@ async def get_playlist_tracks(
             resp = await client.get(
                 url,
                 params=params,
-                headers={"Authorization": f"Bearer {current_user.spotify_access_token}"},
+                headers={"Authorization": f"Bearer {spotify_token}"},
             )
             if resp.status_code != 200:
                 raise HTTPException(status_code=resp.status_code, detail="Playlist konnte nicht geladen werden.")
@@ -259,14 +256,10 @@ async def get_playlist_tracks(
 async def create_playlist(
     payload: CreatePlaylistRequest,
     current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
-    if not current_user.spotify_access_token:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No Spotify access token found. Please re-login.",
-        )
-
-    headers = {"Authorization": f"Bearer {current_user.spotify_access_token}"}
+    spotify_token = await get_valid_spotify_token(current_user, db)
+    headers = {"Authorization": f"Bearer {spotify_token}"}
 
     try:
         async with httpx.AsyncClient() as client:
@@ -326,14 +319,10 @@ async def create_playlist(
 async def save_tracks(
     payload: SaveTracksRequest,
     current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
-    if not current_user.spotify_access_token:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No Spotify access token found. Please re-login.",
-        )
-
-    headers = {"Authorization": f"Bearer {current_user.spotify_access_token}"}
+    spotify_token = await get_valid_spotify_token(current_user, db)
+    headers = {"Authorization": f"Bearer {spotify_token}"}
     track_uris = [f"spotify:track:{tid}" for tid in payload.track_ids]
 
     try:

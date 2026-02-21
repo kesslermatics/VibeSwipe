@@ -44,7 +44,7 @@ function extractTrackId(uri: string | null): string | null {
     return parts.length === 3 ? parts[2] : null;
 }
 
-export default function DiscoverPage() {
+export default function DiscoverPage({ onLogout: _onLogout }: { onLogout: () => void }) {
     const navigate = useNavigate();
     const token = localStorage.getItem("token");
     const [prompt, setPrompt] = useState("");

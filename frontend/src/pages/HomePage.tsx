@@ -44,28 +44,26 @@ const tiles: Tile[] = [
     },
 ];
 
-export default function HomePage() {
+export default function HomePage({ onLogout }: { onLogout: () => void }) {
     const navigate = useNavigate();
     const [user, setUser] = useState<UserProfile | null>(null);
     const token = localStorage.getItem("token");
 
     useEffect(() => {
         if (!token) {
-            navigate("/login");
+            onLogout();
             return;
         }
 
         api<UserProfile>("/me", { token })
             .then(setUser)
             .catch(() => {
-                localStorage.removeItem("token");
-                navigate("/login");
+                onLogout();
             });
-    }, [token, navigate]);
+    }, [token, onLogout]);
 
     const handleLogout = () => {
-        localStorage.removeItem("token");
-        navigate("/login");
+        onLogout();
     };
 
     return (

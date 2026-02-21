@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "../lib/api";
 
@@ -6,8 +6,13 @@ export default function CallbackPage() {
     const [searchParams] = useSearchParams();
     const navigate = useNavigate();
     const [error, setError] = useState("");
+    const calledRef = useRef(false);
 
     useEffect(() => {
+        // Prevent double-fire (React StrictMode or re-render)
+        if (calledRef.current) return;
+        calledRef.current = true;
+
         const code = searchParams.get("code");
         const spotifyError = searchParams.get("error");
 
@@ -22,7 +27,6 @@ export default function CallbackPage() {
         }
 
         // Exchange the code for our JWT
-        // Use the redirect_uri that was resolved by the backend during login
         const redirectUri =
             sessionStorage.getItem("spotify_redirect_uri") ||
             `${window.location.origin}/callback`;
@@ -32,12 +36,13 @@ export default function CallbackPage() {
         })
             .then((data) => {
                 localStorage.setItem("token", data.access_token);
-                navigate("/", { replace: true });
+                // Force full reload so App re-reads the token
+                window.location.replace("/");
             })
             .catch((err) => {
                 setError(err instanceof Error ? err.message : "Login fehlgeschlagen");
             });
-    }, [searchParams, navigate]);
+    }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
     return (
         <div className="flex min-h-screen items-center justify-center px-4">
