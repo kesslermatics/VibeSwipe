@@ -232,7 +232,7 @@ async def get_playlist_tracks(
 
     songs: list[str] = []
     url = f"{SPOTIFY_API_BASE}/playlists/{resolved_id}/tracks"
-    params: dict = {"limit": 100}
+    params: dict = {"limit": 100, "market": "from_token"}
 
     async with httpx.AsyncClient() as client:
         while url:
@@ -459,12 +459,33 @@ async def debug_token_info(
                 # Test getting tracks from the first playlist
                 pid = items[0]["id"]
                 r2 = await client.get(
-                    f"https://api.spotify.com/v1/playlists/{pid}/tracks?limit=1",
+                    f"https://api.spotify.com/v1/playlists/{pid}/tracks?limit=1&market=from_token",
                     headers={"Authorization": f"Bearer {spotify_token}"},
                 )
                 results["playlist_tracks_status"] = r2.status_code
                 if r2.status_code != 200:
                     results["playlist_tracks_error"] = r2.text[:300]
+                else:
+                    results["playlist_tracks_sample"] = r2.json().get("total", "unknown")
+
+                # Also test without market param
+                r3 = await client.get(
+                    f"https://api.spotify.com/v1/playlists/{pid}/tracks?limit=1",
+                    headers={"Authorization": f"Bearer {spotify_token}"},
+                )
+                results["playlist_tracks_no_market_status"] = r3.status_code
+
+                # Test the full playlist endpoint (not /tracks sub-resource)
+                r4 = await client.get(
+                    f"https://api.spotify.com/v1/playlists/{pid}?market=from_token",
+                    headers={"Authorization": f"Bearer {spotify_token}"},
+                )
+                results["full_playlist_status"] = r4.status_code
+                if r4.status_code == 200:
+                    pd = r4.json()
+                    results["full_playlist_tracks_total"] = pd.get("tracks", {}).get("total", "missing")
+                else:
+                    results["full_playlist_error"] = r4.text[:200]
         else:
             results["playlists_error"] = r.text[:300]
 
