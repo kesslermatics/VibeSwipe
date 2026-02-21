@@ -1,6 +1,4 @@
-const API_BASE = import.meta.env.PROD
-  ? "https://vibeswipe-production.up.railway.app"
-  : "/api";
+const API_BASE = "https://vibeswipe-production.up.railway.app";
 
 interface ApiOptions {
   method?: string;
