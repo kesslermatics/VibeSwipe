@@ -483,7 +483,15 @@ async def debug_token_info(
                 results["full_playlist_status"] = r4.status_code
                 if r4.status_code == 200:
                     pd = r4.json()
-                    results["full_playlist_tracks_total"] = pd.get("tracks", {}).get("total", "missing")
+                    tracks_data = pd.get("tracks", {})
+                    results["full_playlist_tracks_total"] = tracks_data.get("total", "missing")
+                    results["full_playlist_tracks_keys"] = list(tracks_data.keys()) if isinstance(tracks_data, dict) else "not_dict"
+                    items_in_full = tracks_data.get("items", [])
+                    results["full_playlist_items_count"] = len(items_in_full)
+                    if items_in_full:
+                        first_item = items_in_full[0]
+                        t = first_item.get("track", {})
+                        results["first_track_name"] = t.get("name", "?") if t else "no track"
                 else:
                     results["full_playlist_error"] = r4.text[:200]
         else:
