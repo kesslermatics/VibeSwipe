@@ -242,16 +242,21 @@ async def save_tracks(
     headers = {"Authorization": f"Bearer {current_user.spotify_access_token}"}
 
     try:
-        # 1. Check which tracks are already saved
+        # 1. Check which tracks are already saved (best-effort, skip on error)
         already_saved = 0
-        async with httpx.AsyncClient() as client:
-            check_resp = await client.get(
-                f"{SPOTIFY_API_BASE}/me/tracks/contains",
-                headers=headers,
-                params={"ids": ",".join(payload.track_ids)},
-            )
-        if check_resp.status_code == 200:
-            already_saved = sum(1 for x in check_resp.json() if x)
+        try:
+            for i in range(0, len(payload.track_ids), 50):
+                chunk = payload.track_ids[i : i + 50]
+                async with httpx.AsyncClient() as client:
+                    check_resp = await client.get(
+                        f"{SPOTIFY_API_BASE}/me/tracks/contains",
+                        headers=headers,
+                        params={"ids": ",".join(chunk)},
+                    )
+                if check_resp.status_code == 200:
+                    already_saved += sum(1 for x in check_resp.json() if x)
+        except Exception:
+            already_saved = 0  # Skip check if it fails
 
         # 2. Save in chunks of 50 (Spotify limit)
         for i in range(0, len(payload.track_ids), 50):
@@ -263,9 +268,16 @@ async def save_tracks(
                     json={"ids": chunk},
                 )
             if save_resp.status_code not in (200, 201):
+                error_detail = save_resp.text
+                # If it's a scope issue, give a clear message
+                if save_resp.status_code == 403 or "insufficient" in error_detail.lower():
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="Spotify braucht neue Berechtigungen. Bitte logge dich neu ein.",
+                    )
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Failed to save tracks: {save_resp.text}",
+                    detail=f"Spotify error: {error_detail}",
                 )
 
         return {

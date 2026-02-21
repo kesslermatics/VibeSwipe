@@ -247,11 +247,10 @@ export default function DiscoverPage() {
                                 return (
                                     <div
                                         key={i}
-                                        className={`flex items-center gap-3 rounded-xl p-3 transition-all ${
-                                            isSaved
+                                        className={`flex items-center gap-3 rounded-xl p-3 transition-all ${isSaved
                                                 ? "bg-green-500/10 ring-1 ring-green-500/30"
                                                 : "glass-light hover:ring-1 hover:ring-white/10"
-                                        }`}
+                                            }`}
                                     >
                                         {/* Album Art + Preview */}
                                         <div className="relative h-14 w-14 flex-shrink-0 overflow-hidden rounded-lg bg-gray-800">
@@ -259,22 +258,6 @@ export default function DiscoverPage() {
                                                 <img src={song.album_image} alt={song.title} className="h-full w-full object-cover" />
                                             ) : (
                                                 <div className="flex h-full w-full items-center justify-center text-xl text-gray-600">🎵</div>
-                                            )}
-                                            {song.preview_url && (
-                                                <button
-                                                    onClick={() => togglePreview(i, song.preview_url!)}
-                                                    className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition hover:opacity-100"
-                                                >
-                                                    {isPlaying ? (
-                                                        <svg className="h-6 w-6 text-white" fill="currentColor" viewBox="0 0 24 24">
-                                                            <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z" />
-                                                        </svg>
-                                                    ) : (
-                                                        <svg className="h-6 w-6 text-white" fill="currentColor" viewBox="0 0 24 24">
-                                                            <path d="M8 5v14l11-7z" />
-                                                        </svg>
-                                                    )}
-                                                </button>
                                             )}
                                             {isPlaying && (
                                                 <div className="absolute bottom-0.5 left-0.5 right-0.5 flex h-1.5 items-end justify-center gap-[2px]">
@@ -284,6 +267,29 @@ export default function DiscoverPage() {
                                                 </div>
                                             )}
                                         </div>
+
+                                        {/* Play/Pause button – always visible */}
+                                        {song.preview_url ? (
+                                            <button
+                                                onClick={() => togglePreview(i, song.preview_url!)}
+                                                className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full transition ${isPlaying
+                                                        ? "bg-green-500 text-gray-950"
+                                                        : "bg-white/10 text-white hover:bg-green-500 hover:text-gray-950"
+                                                    }`}
+                                            >
+                                                {isPlaying ? (
+                                                    <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 24 24">
+                                                        <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z" />
+                                                    </svg>
+                                                ) : (
+                                                    <svg className="h-4 w-4 ml-0.5" fill="currentColor" viewBox="0 0 24 24">
+                                                        <path d="M8 5v14l11-7z" />
+                                                    </svg>
+                                                )}
+                                            </button>
+                                        ) : (
+                                            <div className="h-9 w-9 flex-shrink-0" />
+                                        )}
 
                                         {/* Song Info */}
                                         <div className="min-w-0 flex-1">
@@ -297,11 +303,10 @@ export default function DiscoverPage() {
                                             <button
                                                 onClick={() => saveSingleSong(i)}
                                                 disabled={isSaved || isSaving || !song.spotify_uri}
-                                                className={`rounded-lg p-2 transition ${
-                                                    isSaved
+                                                className={`rounded-lg p-2 transition ${isSaved
                                                         ? "text-green-400"
                                                         : "text-gray-500 hover:bg-green-500/10 hover:text-green-400"
-                                                } disabled:cursor-default`}
+                                                    } disabled:cursor-default`}
                                                 title={isSaved ? "Gespeichert ✓" : "Zu Lieblingssongs hinzufügen"}
                                             >
                                                 {isSaving ? (
