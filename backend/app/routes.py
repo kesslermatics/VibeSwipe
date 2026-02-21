@@ -419,13 +419,17 @@ def health_check():
     return {"status": "ok"}
 
 
-# ── Debug: Check Spotify token scopes ─────────────────
+# ── Debug: Check Spotify token scopes (TEMPORARY - NO AUTH) ──
 @router.get("/debug/token-info")
 async def debug_token_info(
-    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Debug endpoint to check what scopes the current Spotify token has."""
+    """TEMPORARY debug endpoint - no auth required."""
+    # Get the first user from DB
+    current_user = db.query(User).first()
+    if not current_user:
+        return {"error": "No users in DB"}
+
     spotify_token = await get_valid_spotify_token(current_user, db)
 
     # Test each relevant endpoint
