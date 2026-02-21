@@ -1,15 +1,10 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel
 
 
 # ── Auth ──────────────────────────────────────────────
-class UserCreate(BaseModel):
-    email: EmailStr
-    password: str
-
-
-class UserLogin(BaseModel):
-    email: EmailStr
-    password: str
+class SpotifyCallback(BaseModel):
+    code: str
+    redirect_uri: str
 
 
 class Token(BaseModel):
@@ -17,9 +12,12 @@ class Token(BaseModel):
     token_type: str = "bearer"
 
 
-# ── Settings ──────────────────────────────────────────
-class SpotifyKeyUpdate(BaseModel):
-    spotify_api_key: str
+class UserResponse(BaseModel):
+    spotify_id: str
+    email: str | None
+    display_name: str | None
+
+    model_config = {"from_attributes": True}
 
 
 class MessageResponse(BaseModel):

@@ -2,7 +2,6 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from jose import JWTError, jwt
-from passlib.context import CryptContext
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
@@ -13,17 +12,7 @@ from app.models import User
 
 settings = get_settings()
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/login")
-
-
-# ── Password helpers ──────────────────────────────────
-def hash_password(password: str) -> str:
-    return pwd_context.hash(password)
-
-
-def verify_password(plain: str, hashed: str) -> bool:
-    return pwd_context.verify(plain, hashed)
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/callback")
 
 
 # ── JWT helpers ───────────────────────────────────────
@@ -48,13 +37,13 @@ def get_current_user(
     )
     try:
         payload = jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
-        email: Optional[str] = payload.get("sub")
-        if email is None:
+        spotify_id: Optional[str] = payload.get("sub")
+        if spotify_id is None:
             raise credentials_exception
     except JWTError:
         raise credentials_exception
 
-    user = db.query(User).filter(User.email == email).first()
+    user = db.query(User).filter(User.spotify_id == spotify_id).first()
     if user is None:
         raise credentials_exception
     return user

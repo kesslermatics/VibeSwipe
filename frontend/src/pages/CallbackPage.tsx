@@ -1,0 +1,65 @@
+import { useEffect, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { api } from "../lib/api";
+
+export default function CallbackPage() {
+    const [searchParams] = useSearchParams();
+    const navigate = useNavigate();
+    const [error, setError] = useState("");
+
+    useEffect(() => {
+        const code = searchParams.get("code");
+        const spotifyError = searchParams.get("error");
+
+        if (spotifyError) {
+            setError("Spotify-Login wurde abgebrochen.");
+            return;
+        }
+
+        if (!code) {
+            setError("Kein Autorisierungscode erhalten.");
+            return;
+        }
+
+        // Exchange the code for our JWT
+        const redirectUri = `${window.location.origin}/callback`;
+        api<{ access_token: string }>("/auth/callback", {
+            method: "POST",
+            body: { code, redirect_uri: redirectUri },
+        })
+            .then((data) => {
+                localStorage.setItem("token", data.access_token);
+                navigate("/", { replace: true });
+            })
+            .catch((err) => {
+                setError(err instanceof Error ? err.message : "Login fehlgeschlagen");
+            });
+    }, [searchParams, navigate]);
+
+    return (
+        <div className="flex min-h-screen items-center justify-center px-4">
+            <div className="glass w-full max-w-md rounded-2xl p-8 text-center">
+                {error ? (
+                    <>
+                        <div className="mb-4 text-4xl">😕</div>
+                        <h2 className="text-xl font-bold text-red-400">Fehler</h2>
+                        <p className="mt-2 text-sm text-gray-400">{error}</p>
+                        <button
+                            onClick={() => navigate("/login")}
+                            className="mt-6 rounded-xl bg-green-500 px-6 py-3 text-sm font-semibold text-gray-950 transition hover:bg-green-400"
+                        >
+                            Zurück zum Login
+                        </button>
+                    </>
+                ) : (
+                    <>
+                        <div className="mb-4 inline-block h-8 w-8 animate-spin rounded-full border-4 border-green-500 border-t-transparent" />
+                        <p className="text-sm text-gray-400">
+                            Verbinde mit Spotify…
+                        </p>
+                    </>
+                )}
+            </div>
+        </div>
+    );
+}

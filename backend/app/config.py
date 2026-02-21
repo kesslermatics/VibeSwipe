@@ -8,7 +8,13 @@ class Settings(BaseSettings):
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 60
     cors_origins: str = "http://localhost:5173,http://localhost:3000,https://vibeswipe.kesslermatics.com"
-    spotify_client_id: str = "cbe02afc443b4e34b69ea0e197be5c12"
+    spotify_client_id: str = ""
+    spotify_client_secret: str = ""
+    spotify_redirect_uri: str = "http://localhost:5173/callback,https://vibeswipe.kesslermatics.com/callback"
+
+    @property
+    def spotify_redirect_uris(self) -> list[str]:
+        return [u.strip() for u in self.spotify_redirect_uri.split(",")]
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
