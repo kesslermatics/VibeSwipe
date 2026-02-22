@@ -17,6 +17,7 @@ import json
 import random
 import asyncio
 import logging
+import time
 from datetime import date
 
 import httpx
@@ -194,28 +195,46 @@ Rules:
         raise Exception(f"Gemini hat ungültiges JSON zurückgegeben: {e}")
 
 
+# Limit concurrent Spotify API requests to avoid rate limiting
+_spotify_semaphore = asyncio.Semaphore(3)
+
+
+def _parse_retry_after(headers: dict) -> float:
+    """Parse Retry-After header – can be seconds or a Unix timestamp."""
+    raw = headers.get("Retry-After", "2")
+    try:
+        value = int(raw)
+    except ValueError:
+        return 2.0
+    # If the value is absurdly large, it's a Unix timestamp, not seconds
+    if value > 300:
+        wait = max(0, value - int(time.time()))
+        return min(wait, 30)  # cap at 30s to be safe
+    return min(value, 30)
+
+
 async def search_spotify_track(query: str, spotify_token: str) -> dict | None:
     """Search Spotify for a track and return URI + metadata."""
-    async with httpx.AsyncClient(timeout=15) as client:
-        resp = await client.get(
-            f"{SPOTIFY_API}/search",
-            params={"q": query, "type": "track", "limit": 1},
-            headers={"Authorization": f"Bearer {spotify_token}"},
-        )
-    if resp.status_code == 429:
-        # Rate limited – wait and retry once
-        retry_after = int(resp.headers.get("Retry-After", "2"))
-        logger.warning(f"Spotify rate limited, waiting {retry_after}s")
-        await asyncio.sleep(retry_after)
+    async with _spotify_semaphore:
         async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.get(
                 f"{SPOTIFY_API}/search",
                 params={"q": query, "type": "track", "limit": 1},
                 headers={"Authorization": f"Bearer {spotify_token}"},
             )
-    if resp.status_code != 200:
-        logger.warning(f"Spotify search failed for '{query}': {resp.status_code}")
-        return None
+        if resp.status_code == 429:
+            wait = _parse_retry_after(dict(resp.headers))
+            logger.warning(f"Spotify rate limited, waiting {wait:.1f}s for: {query}")
+            await asyncio.sleep(wait)
+            async with httpx.AsyncClient(timeout=15) as client:
+                resp = await client.get(
+                    f"{SPOTIFY_API}/search",
+                    params={"q": query, "type": "track", "limit": 1},
+                    headers={"Authorization": f"Bearer {spotify_token}"},
+                )
+        if resp.status_code != 200:
+            logger.warning(f"Spotify search failed for '{query}': {resp.status_code}")
+            return None
 
     items = resp.json().get("tracks", {}).get("items", [])
     if not items:
@@ -298,16 +317,16 @@ async def generate_daily_drive(
     logger.info("Daily Drive: Resolving new discoveries on Spotify...")
     new_discovery_uris: list[str] = []
     new_songs = gemini_result.get("new_discoveries", [])
-    # Process in batches of 5 to avoid Spotify rate limits
-    for batch_start in range(0, len(new_songs), 5):
-        batch = new_songs[batch_start:batch_start + 5]
+    # Process in batches of 3 to avoid Spotify rate limits
+    for batch_start in range(0, len(new_songs), 3):
+        batch = new_songs[batch_start:batch_start + 3]
         batch_results = await asyncio.gather(
             *(resolve_new_song(s) for s in batch)
         )
         new_discovery_uris.extend(u for u in batch_results if u)
-        # Small delay between batches
-        if batch_start + 5 < len(new_songs):
-            await asyncio.sleep(0.2)
+        # Delay between batches to stay under rate limits
+        if batch_start + 3 < len(new_songs):
+            await asyncio.sleep(0.5)
 
     logger.info(f"Daily Drive: Resolved {len(new_discovery_uris)} new discovery URIs")
 
