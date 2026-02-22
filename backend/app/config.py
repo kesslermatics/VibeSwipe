@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     spotify_client_secret: str = ""
     spotify_redirect_uri: str = "http://127.0.0.1:5173/callback,https://vibeswipe.kesslermatics.com/callback"
     gemini_api_key: str = ""
+    redis_url: str = ""
 
     @property
     def spotify_redirect_uris(self) -> list[str]:

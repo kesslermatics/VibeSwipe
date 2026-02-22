@@ -20,6 +20,7 @@ import logging
 from datetime import date
 
 import httpx
+import redis
 from app.config import get_settings
 
 settings = get_settings()
@@ -32,6 +33,12 @@ GEMINI_URL = (
     f"gemini-3-flash-preview:generateContent?key={settings.gemini_api_key}"
 )
 
+# Redis Client initialisieren
+redis_client = redis.Redis.from_url(settings.redis_url, decode_responses=True)
+
+# Hilfsfunktion: Key für Song generieren
+def song_cache_key(title: str, artist: str) -> str:
+    return f"song_uri::{title.lower().strip()}|||{artist.lower().strip()}"
 
 async def fetch_on_repeat_tracks(spotify_token: str) -> list[dict]:
     """Fetch user's top tracks (short_term ≈ On Repeat, up to 50)."""
@@ -286,6 +293,27 @@ async def robust_add_items_to_playlist(client, playlist_id, chunk, auth_headers,
     return False
 
 
+# Robust Spotify-Search mit Redis-Cache
+async def robust_spotify_search_with_cache(title: str, artist: str, spotify_token: str, max_retries: int = 3) -> dict | None:
+    key = song_cache_key(title, artist)
+    uri = redis_client.get(key)
+    if uri:
+        # Prüfe, ob URI gültig ist (optional: API-Check, hier nur Format)
+        if uri.startswith("spotify:track:"):
+            logger.info(f"Cache hit for '{title} {artist}': {uri}")
+            return {"title": title, "artist": artist, "uri": uri}
+        else:
+            logger.warning(f"Cache invalid URI for '{title} {artist}': {uri}")
+    # Fallback: Suche via API
+    search_result = await robust_spotify_search(f"{title} {artist}", spotify_token, max_retries)
+    if search_result and search_result.get("uri"):
+        redis_client.set(key, search_result["uri"])
+        logger.info(f"Cache set for '{title} {artist}': {search_result['uri']}")
+        return search_result
+    logger.warning(f"No URI found for '{title} {artist}'")
+    return None
+
+
 async def generate_daily_drive(
     spotify_token: str,
     spotify_user_id: str,
@@ -370,7 +398,7 @@ async def generate_daily_drive(
     results: list[tuple[str, str | None]] = []
     for item in all_to_search:
         song = item["song"]
-        search_result = await robust_spotify_search(f"{song['title']} {song['artist']}", spotify_token)
+        search_result = await robust_spotify_search_with_cache(song['title'], song['artist'], spotify_token)
         uri = search_result["uri"] if search_result else None
         results.append((item["type"], uri))
         await asyncio.sleep(1.2)  # Kurze Pause nach jedem Call
