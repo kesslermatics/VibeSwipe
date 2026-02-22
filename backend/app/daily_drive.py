@@ -341,43 +341,39 @@ async def generate_daily_drive(
     logger.info(f"Daily Drive: Matched {len(from_repeat_uris)} from_repeat directly, {len(unmatched_from_repeat)} need search")
 
     # 5. Search unmatched from_repeat + all new discoveries on Spotify
-    #    Use a single shared client and parallel requests (same pattern as discover.py)
+    #    EXAKT wie discover.py: alle Suchen parallel, jede mit eigenem Client, kein Batch, kein Retry
     all_to_search: list[dict] = []
-    # Tag each search so we know where to put the result
     for song in unmatched_from_repeat:
         all_to_search.append({"song": song, "type": "from_repeat"})
     for song in gemini_result.get("new_discoveries", []):
         all_to_search.append({"song": song, "type": "new_discovery"})
 
-    logger.info(f"Daily Drive: Searching {len(all_to_search)} songs on Spotify in batches...")
+    logger.info(f"Daily Drive: Searching {len(all_to_search)} songs on Spotify (parallel, discover.py pattern)...")
 
     async def _search_one(item: dict) -> tuple[str, str | None]:
         song = item["song"]
-        result = await search_spotify_track(
-            f"{song['title']} {song['artist']}", spotify_token
-        )
-        return (item["type"], result["uri"] if result else None)
+        # EXAKT wie discover.py: neuer Client pro Suche, kein Retry
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f"{SPOTIFY_API}/search",
+                params={"q": f"{song['title']} {song['artist']}", "type": "track", "limit": 1},
+                headers={"Authorization": f"Bearer {spotify_token}"},
+            )
+        if resp.status_code != 200:
+            logger.warning(f"Spotify search failed for '{song['title']} {song['artist']}': {resp.status_code}")
+            return (item["type"], None)
+        items = resp.json().get("tracks", {}).get("items", [])
+        if not items:
+            return (item["type"], None)
+        track = items[0]
+        return (item["type"], track["uri"])
+
+    results = await asyncio.gather(
+        *(_search_one(item) for item in all_to_search)
+    )
 
     new_discovery_uris: list[str] = []
-
-    # Wait before searching – the earlier API calls (top tracks, episodes)
-    # have likely consumed part of our rate limit budget
-    await asyncio.sleep(2)
-
-    # Search in small batches with pauses to avoid 429s
-    BATCH_SIZE = 5
-    all_results: list[tuple[str, str | None]] = []
-    for i in range(0, len(all_to_search), BATCH_SIZE):
-        batch = all_to_search[i : i + BATCH_SIZE]
-        batch_results = await asyncio.gather(
-            *(_search_one(item) for item in batch)
-        )
-        all_results.extend(batch_results)
-        # Pause between batches (skip after last batch)
-        if i + BATCH_SIZE < len(all_to_search):
-            await asyncio.sleep(1.5)
-
-    for typ, uri in all_results:
+    for typ, uri in results:
         if uri is None:
             continue
         if typ == "from_repeat":
