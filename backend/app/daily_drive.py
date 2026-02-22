@@ -227,30 +227,47 @@ Rules:
 async def search_spotify_track(query: str, spotify_token: str) -> dict | None:
     """Search Spotify for a track and return URI + metadata.
     
-    Uses the same pattern as discover.py – one client per search.
+    Retries once on 429 (rate limit) after a short wait.
     """
-    async with httpx.AsyncClient() as client:
-        resp = await client.get(
-            f"{SPOTIFY_API}/search",
-            params={"q": query, "type": "track", "limit": 1},
-            headers={"Authorization": f"Bearer {spotify_token}"},
-        )
+    headers = {"Authorization": f"Bearer {spotify_token}"}
+    params = {"q": query, "type": "track", "limit": 1}
 
-    if resp.status_code != 200:
+    for attempt in range(3):
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f"{SPOTIFY_API}/search",
+                params=params,
+                headers=headers,
+            )
+
+        if resp.status_code == 200:
+            items = resp.json().get("tracks", {}).get("items", [])
+            if not items:
+                return None
+            track = items[0]
+            return {
+                "title": track["name"],
+                "artist": ", ".join(a["name"] for a in track["artists"]),
+                "uri": track["uri"],
+                "id": track["id"],
+            }
+
+        if resp.status_code == 429:
+            # Parse Retry-After header (seconds to wait)
+            retry_after = resp.headers.get("Retry-After", "3")
+            try:
+                wait = min(int(retry_after), 10)  # Cap at 10s in case it's a timestamp
+            except ValueError:
+                wait = 3
+            logger.info(f"Rate limited on '{query}', waiting {wait}s (attempt {attempt + 1}/3)")
+            await asyncio.sleep(wait)
+            continue
+
         logger.warning(f"Spotify search failed for '{query}': {resp.status_code}")
         return None
 
-    items = resp.json().get("tracks", {}).get("items", [])
-    if not items:
-        return None
-
-    track = items[0]
-    return {
-        "title": track["name"],
-        "artist": ", ".join(a["name"] for a in track["artists"]),
-        "uri": track["uri"],
-        "id": track["id"],
-    }
+    logger.warning(f"Spotify search gave up after 3 retries for '{query}'")
+    return None
 
 
 async def generate_daily_drive(
@@ -272,7 +289,25 @@ async def generate_daily_drive(
             "Hör mehr Musik und versuche es später nochmal!"
         )
 
-    # 2. Ask Gemini to curate
+    # 2. Fetch podcast episodes EARLY (before Gemini) so the rate limit
+    #    has time to recover while Gemini processes (~5-10s)
+    unplayed_episodes: list[dict] = []
+    played_episodes: list[dict] = []
+    if selected_show_ids:
+        logger.info(f"Daily Drive: Fetching episodes for {len(selected_show_ids)} shows (sequentially)...")
+        for show_id in selected_show_ids:
+            eps = await fetch_show_episodes(show_id, spotify_token, limit=20)
+            for ep in eps:
+                if ep["fully_played"]:
+                    played_episodes.append(ep)
+                else:
+                    unplayed_episodes.append(ep)
+            # Small pause between shows to avoid rate limiting
+            if len(selected_show_ids) > 1:
+                await asyncio.sleep(0.5)
+        logger.info(f"Daily Drive: Found {len(unplayed_episodes)} unplayed + {len(played_episodes)} played episodes")
+
+    # 3. Ask Gemini to curate (NO Spotify API calls → rate limit recovers here!)
     logger.info("Daily Drive: Asking Gemini to curate songs...")
     gemini_result = await ask_gemini_daily_drive(on_repeat)
     logger.info(
@@ -280,7 +315,7 @@ async def generate_daily_drive(
         f"{len(gemini_result.get('new_discoveries', []))} new_discoveries"
     )
 
-    # 3. Map "from_repeat" songs back to their Spotify URIs (no API calls needed)
+    # 4. Map "from_repeat" songs back to their Spotify URIs (no API calls needed)
     on_repeat_map = {}
     for t in on_repeat:
         key = f"{t['title'].lower().strip()}|||{t['artist'].lower().strip()}"
@@ -305,7 +340,7 @@ async def generate_daily_drive(
 
     logger.info(f"Daily Drive: Matched {len(from_repeat_uris)} from_repeat directly, {len(unmatched_from_repeat)} need search")
 
-    # 4. Search unmatched from_repeat + all new discoveries on Spotify
+    # 5. Search unmatched from_repeat + all new discoveries on Spotify
     #    Use a single shared client and parallel requests (same pattern as discover.py)
     all_to_search: list[dict] = []
     # Tag each search so we know where to put the result
@@ -314,7 +349,7 @@ async def generate_daily_drive(
     for song in gemini_result.get("new_discoveries", []):
         all_to_search.append({"song": song, "type": "new_discovery"})
 
-    logger.info(f"Daily Drive: Searching {len(all_to_search)} songs on Spotify (parallel)...")
+    logger.info(f"Daily Drive: Searching {len(all_to_search)} songs on Spotify in batches...")
 
     async def _search_one(item: dict) -> tuple[str, str | None]:
         song = item["song"]
@@ -325,11 +360,24 @@ async def generate_daily_drive(
 
     new_discovery_uris: list[str] = []
 
-    results = await asyncio.gather(
-        *(_search_one(item) for item in all_to_search)
-    )
+    # Wait before searching – the earlier API calls (top tracks, episodes)
+    # have likely consumed part of our rate limit budget
+    await asyncio.sleep(2)
 
-    for typ, uri in results:
+    # Search in small batches with pauses to avoid 429s
+    BATCH_SIZE = 5
+    all_results: list[tuple[str, str | None]] = []
+    for i in range(0, len(all_to_search), BATCH_SIZE):
+        batch = all_to_search[i : i + BATCH_SIZE]
+        batch_results = await asyncio.gather(
+            *(_search_one(item) for item in batch)
+        )
+        all_results.extend(batch_results)
+        # Pause between batches (skip after last batch)
+        if i + BATCH_SIZE < len(all_to_search):
+            await asyncio.sleep(1.5)
+
+    for typ, uri in all_results:
         if uri is None:
             continue
         if typ == "from_repeat":
@@ -339,7 +387,7 @@ async def generate_daily_drive(
 
     logger.info(f"Daily Drive: Final counts – {len(from_repeat_uris)} from_repeat, {len(new_discovery_uris)} new discoveries")
 
-    # 5. Combine: shuffle both sets for variety
+    # 6. Combine: shuffle both sets for variety
     random.shuffle(from_repeat_uris)
     random.shuffle(new_discovery_uris)
 
@@ -360,25 +408,9 @@ async def generate_daily_drive(
         all_song_uris.append(uri)
         use_repeat = not use_repeat
 
-    # 6. Fetch podcast episodes if shows were selected
+    # 7. Pick podcast episodes from the data fetched in step 2
     episode_uris: list[str] = []
     if selected_show_ids:
-        episode_tasks = [
-            fetch_show_episodes(show_id, spotify_token, limit=50)
-            for show_id in selected_show_ids
-        ]
-        all_episodes_raw = await asyncio.gather(*episode_tasks)
-
-        # Separate unplayed and played episodes
-        unplayed_episodes: list[dict] = []
-        played_episodes: list[dict] = []
-        for eps in all_episodes_raw:
-            for ep in eps:
-                if ep["fully_played"]:
-                    played_episodes.append(ep)
-                else:
-                    unplayed_episodes.append(ep)
-
         # Sort both lists by release_date descending (newest first)
         unplayed_episodes.sort(key=lambda e: e.get("release_date", ""), reverse=True)
         played_episodes.sort(key=lambda e: e.get("release_date", ""), reverse=True)
@@ -400,7 +432,7 @@ async def generate_daily_drive(
 
         episode_uris = [ep["uri"] for ep in chosen_episodes]
 
-    # 7. Interleave: 4 songs → 1 episode → 4 songs → 1 episode …
+    # 8. Interleave: 4 songs → 1 episode → 4 songs → 1 episode …
     final_uris: list[str] = []
     song_idx = 0
     ep_idx = 0
@@ -416,7 +448,7 @@ async def generate_daily_drive(
             final_uris.append(episode_uris[ep_idx])
             ep_idx += 1
 
-    # 8. Create the Spotify playlist
+    # 9. Create the Spotify playlist
     logger.info(f"Daily Drive: Creating playlist with {len(final_uris)} items...")
     today = date.today().strftime("%d.%m.%Y")
     playlist_name = f"Daily Drive – {today}"
