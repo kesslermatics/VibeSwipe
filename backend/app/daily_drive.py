@@ -90,28 +90,58 @@ async def fetch_saved_shows(spotify_token: str) -> list[dict]:
     return shows
 
 
-async def fetch_show_episodes(show_id: str, spotify_token: str, limit: int = 10) -> list[dict]:
-    """Fetch the most recent episodes of a show."""
-    async with httpx.AsyncClient() as client:
-        resp = await client.get(
-            f"{SPOTIFY_API}/shows/{show_id}/episodes",
-            params={"limit": limit, "market": "DE"},
-            headers={"Authorization": f"Bearer {spotify_token}"},
-        )
-    if resp.status_code != 200:
-        logger.warning(f"Failed to fetch episodes for show {show_id}: {resp.status_code}")
-        return []
+async def fetch_show_episodes(show_id: str, spotify_token: str, limit: int = 50) -> list[dict]:
+    """
+    Fetch the most recent UNPLAYED episodes of a show.
 
-    data = resp.json()
-    episodes = []
-    for ep in data.get("items", []):
-        episodes.append({
-            "name": ep.get("name", ""),
-            "uri": ep.get("uri", ""),
-            "id": ep.get("id", ""),
-            "duration_ms": ep.get("duration_ms", 0),
-            "show_id": show_id,
-        })
+    Strategy: fetch episodes sorted newest-first (Spotify default).
+    Skip any episode that has been fully played (resume_point.fully_played).
+    Return the first `needed` unplayed episodes.
+    If all fetched episodes are played, paginate to older ones.
+    Requires scope 'user-read-playback-position' for resume_point data.
+    """
+    headers = {"Authorization": f"Bearer {spotify_token}"}
+    episodes: list[dict] = []
+    offset = 0
+    max_pages = 5  # Safety limit – don't paginate forever
+
+    async with httpx.AsyncClient() as client:
+        for _ in range(max_pages):
+            resp = await client.get(
+                f"{SPOTIFY_API}/shows/{show_id}/episodes",
+                params={"limit": limit, "offset": offset, "market": "DE"},
+                headers=headers,
+            )
+            if resp.status_code != 200:
+                logger.warning(f"Failed to fetch episodes for show {show_id}: {resp.status_code}")
+                break
+
+            data = resp.json()
+            items = data.get("items", [])
+            if not items:
+                break
+
+            for ep in items:
+                # Check if episode was fully played
+                resume_point = ep.get("resume_point", {})
+                fully_played = resume_point.get("fully_played", False) if resume_point else False
+
+                episodes.append({
+                    "name": ep.get("name", ""),
+                    "uri": ep.get("uri", ""),
+                    "id": ep.get("id", ""),
+                    "duration_ms": ep.get("duration_ms", 0),
+                    "release_date": ep.get("release_date", ""),
+                    "fully_played": fully_played,
+                    "show_id": show_id,
+                })
+
+            # If there are no more pages, stop
+            if not data.get("next"):
+                break
+
+            offset += limit
+
     return episodes
 
 
@@ -333,22 +363,41 @@ async def generate_daily_drive(
     episode_uris: list[str] = []
     if selected_show_ids:
         episode_tasks = [
-            fetch_show_episodes(show_id, spotify_token, limit=10)
+            fetch_show_episodes(show_id, spotify_token, limit=50)
             for show_id in selected_show_ids
         ]
         all_episodes_raw = await asyncio.gather(*episode_tasks)
 
-        # Collect all episodes, pick random ones
-        all_episodes = []
+        # Separate unplayed and played episodes
+        unplayed_episodes: list[dict] = []
+        played_episodes: list[dict] = []
         for eps in all_episodes_raw:
-            all_episodes.extend(eps)
+            for ep in eps:
+                if ep["fully_played"]:
+                    played_episodes.append(ep)
+                else:
+                    unplayed_episodes.append(ep)
 
-        if all_episodes:
-            random.shuffle(all_episodes)
-            # We need roughly len(all_song_uris) / 4 episodes
-            needed = max(1, len(all_song_uris) // 4)
-            chosen_episodes = all_episodes[:needed]
-            episode_uris = [ep["uri"] for ep in chosen_episodes]
+        # Sort both lists by release_date descending (newest first)
+        unplayed_episodes.sort(key=lambda e: e.get("release_date", ""), reverse=True)
+        played_episodes.sort(key=lambda e: e.get("release_date", ""), reverse=True)
+
+        # We need roughly len(all_song_uris) / 4 episodes
+        needed = max(1, len(all_song_uris) // 4)
+
+        # Prefer unplayed episodes (newest first), fall back to played if not enough
+        chosen_episodes = unplayed_episodes[:needed]
+        if len(chosen_episodes) < needed:
+            remaining = needed - len(chosen_episodes)
+            chosen_episodes.extend(played_episodes[:remaining])
+
+        logger.info(
+            f"Daily Drive: Picked {len(chosen_episodes)} episodes "
+            f"({min(needed, len(unplayed_episodes))} unplayed, "
+            f"{max(0, len(chosen_episodes) - len(unplayed_episodes))} played fallback)"
+        )
+
+        episode_uris = [ep["uri"] for ep in chosen_episodes]
 
     # 7. Interleave: 4 songs → 1 episode → 4 songs → 1 episode …
     final_uris: list[str] = []
