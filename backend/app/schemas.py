@@ -66,3 +66,18 @@ class SaveTracksRequest(BaseModel):
 class SaveTracksResponse(BaseModel):
     saved: int
     already_saved: int
+
+
+# ── Daily Drive ───────────────────────────────────────
+class DailyDriveRequest(BaseModel):
+    selected_show_ids: list[str] = []  # Spotify show IDs the user picked
+
+
+class DailyDriveResponse(BaseModel):
+    playlist_url: str
+    playlist_id: str
+    playlist_name: str
+    total_tracks: int
+    on_repeat_count: int
+    new_discoveries_count: int
+    episodes_count: int

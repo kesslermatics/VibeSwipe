@@ -27,6 +27,14 @@ const tiles: Tile[] = [
         route: "/discover",
     },
     {
+        id: "daily-drive",
+        emoji: "🚗",
+        title: "Daily Drive",
+        description: "Dein persönlicher Mix aus On-Repeat Songs, neuen Entdeckungen & Podcasts",
+        color: "from-orange-500/20 to-amber-500/10 hover:ring-orange-500/40",
+        route: "/daily-drive",
+    },
+    {
         id: "swipe",
         emoji: "💿",
         title: "Swipe",
@@ -92,7 +100,7 @@ export default function HomePage({ onLogout }: { onLogout: () => void }) {
                 {/* Feature Tiles */}
                 <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                     {tiles.map((tile) => {
-                        const isAvailable = tile.id === "discover";
+                        const isAvailable = tile.id === "discover" || tile.id === "daily-drive";
                         return (
                             <button
                                 key={tile.id}

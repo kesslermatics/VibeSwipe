@@ -10,9 +10,10 @@ logger = logging.getLogger(__name__)
 from app.config import get_settings
 from app.database import get_db
 from app.models import User
-from app.schemas import SpotifyCallback, Token, UserResponse, MessageResponse, DiscoverRequest, DiscoverResponse, CreatePlaylistRequest, CreatePlaylistResponse, SaveTracksRequest, SaveTracksResponse
+from app.schemas import SpotifyCallback, Token, UserResponse, MessageResponse, DiscoverRequest, DiscoverResponse, CreatePlaylistRequest, CreatePlaylistResponse, SaveTracksRequest, SaveTracksResponse, DailyDriveRequest, DailyDriveResponse
 from app.auth import create_access_token, get_current_user, get_valid_spotify_token, refresh_spotify_token
 from app.discover import discover_songs
+from app.daily_drive import fetch_saved_shows, generate_daily_drive
 
 router = APIRouter()
 settings = get_settings()
@@ -20,7 +21,7 @@ settings = get_settings()
 SPOTIFY_AUTH_URL = "https://accounts.spotify.com/authorize"
 SPOTIFY_TOKEN_URL = "https://accounts.spotify.com/api/token"
 SPOTIFY_ME_URL = "https://api.spotify.com/v1/me"
-SPOTIFY_SCOPES = "user-read-email user-read-private user-top-read user-library-read user-library-modify playlist-read-private playlist-read-collaborative playlist-modify-public playlist-modify-private"
+SPOTIFY_SCOPES = "user-read-email user-read-private user-top-read user-library-read user-library-modify playlist-read-private playlist-read-collaborative playlist-modify-public playlist-modify-private user-read-playback-position"
 
 
 def _normalize_uri(uri: str) -> str:
@@ -410,6 +411,48 @@ async def save_tracks(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Saving tracks failed: {str(e)}",
+        )
+
+
+# ── Daily Drive: Fetch saved shows (podcasts) ────────
+@router.get("/daily-drive/shows")
+async def get_saved_shows(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Return the user's saved podcast shows for Daily Drive selection."""
+    spotify_token = await get_valid_spotify_token(current_user, db)
+    try:
+        shows = await fetch_saved_shows(spotify_token)
+        return {"shows": shows}
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Could not fetch shows: {str(e)}",
+        )
+
+
+# ── Daily Drive: Generate playlist ───────────────────
+@router.post("/daily-drive/generate", response_model=DailyDriveResponse)
+async def generate_daily_drive_playlist(
+    payload: DailyDriveRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Generate a custom Daily Drive playlist."""
+    spotify_token = await get_valid_spotify_token(current_user, db)
+    try:
+        result = await generate_daily_drive(
+            spotify_token=spotify_token,
+            spotify_user_id=current_user.spotify_id,
+            selected_show_ids=payload.selected_show_ids,
+        )
+        return result
+    except Exception as e:
+        logger.error(f"Daily Drive generation failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Daily Drive Erstellung fehlgeschlagen: {str(e)}",
         )
 
 

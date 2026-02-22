@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
 
@@ -54,14 +54,10 @@ export default function DiscoverPage({ onLogout: _onLogout }: { onLogout: () => 
 
     // Per-song saved state
     const [savedSongs, setSavedSongs] = useState<Set<number>>(new Set());
-    const [savingIdx, setSavingIdx] = useState<number | null>(null);
 
     // Save all
     const [savingAll, setSavingAll] = useState(false);
     const [saveAllResult, setSaveAllResult] = useState<SaveResult | null>(null);
-
-    // Spotify Embed player
-    const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
 
     // Playlist context
     const [showPlaylistPicker, setShowPlaylistPicker] = useState(false);
@@ -71,9 +67,33 @@ export default function DiscoverPage({ onLogout: _onLogout }: { onLogout: () => 
     const [contextSongs, setContextSongs] = useState<string[]>([]);
     const [loadingPlaylistTracks, setLoadingPlaylistTracks] = useState(false);
 
-    const toggleEmbed = (idx: number) => {
-        setExpandedIdx(expandedIdx === idx ? null : idx);
-    };
+    // Global volume control via AudioContext GainNode
+    const [volume, setVolume] = useState(1);
+    const [showVolume, setShowVolume] = useState(false);
+    const audioCtxRef = useRef<AudioContext | null>(null);
+    const gainNodeRef = useRef<GainNode | null>(null);
+
+    useEffect(() => {
+        const ctx = new AudioContext();
+        const gain = ctx.createGain();
+        gain.connect(ctx.destination);
+        audioCtxRef.current = ctx;
+        gainNodeRef.current = gain;
+        return () => { ctx.close(); };
+    }, []);
+
+    const handleVolumeChange = useCallback((newVol: number) => {
+        setVolume(newVol);
+        if (gainNodeRef.current) {
+            gainNodeRef.current.gain.value = newVol;
+        }
+        // Also set volume on all iframe elements via a trick:
+        // We find all iframes and post a message (Spotify doesn't support this)
+        // Instead, we manipulate any <video>/<audio> elements in the page
+        document.querySelectorAll("audio, video").forEach((el) => {
+            (el as HTMLMediaElement).volume = newVol;
+        });
+    }, []);
 
     const openPlaylistPicker = async () => {
         setShowPlaylistPicker(true);
@@ -127,7 +147,6 @@ export default function DiscoverPage({ onLogout: _onLogout }: { onLogout: () => 
         setResult(null);
         setSavedSongs(new Set());
         setSaveAllResult(null);
-        setExpandedIdx(null);
         setLoading(true);
 
         try {
@@ -144,27 +163,6 @@ export default function DiscoverPage({ onLogout: _onLogout }: { onLogout: () => 
             setError(err instanceof Error ? err.message : "Etwas ist schiefgelaufen");
         } finally {
             setLoading(false);
-        }
-    };
-
-    const saveSingleSong = async (idx: number) => {
-        if (!result || savedSongs.has(idx)) return;
-        const song = result.songs[idx];
-        const trackId = extractTrackId(song.spotify_uri);
-        if (!trackId) return;
-
-        setSavingIdx(idx);
-        try {
-            await api<SaveResult>("/save-tracks", {
-                method: "POST",
-                body: { track_ids: [trackId] },
-                token: token || "",
-            });
-            setSavedSongs((prev) => new Set(prev).add(idx));
-        } catch (err: unknown) {
-            setError(err instanceof Error ? err.message : "Song konnte nicht gespeichert werden");
-        } finally {
-            setSavingIdx(null);
         }
     };
 
@@ -209,11 +207,69 @@ export default function DiscoverPage({ onLogout: _onLogout }: { onLogout: () => 
                             <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
                         </svg>
                     </button>
-                    <div>
+                    <div className="flex-1">
                         <h1 className="text-2xl font-bold tracking-tight">
                             <span className="text-green-400">Discover</span>
                         </h1>
                         <p className="text-sm text-gray-400">Beschreibe deine Stimmung oder was du hören willst</p>
+                    </div>
+
+                    {/* Global volume control */}
+                    <div className="relative">
+                        <button
+                            onClick={() => setShowVolume(!showVolume)}
+                            className="rounded-lg p-2 text-gray-400 ring-1 ring-white/10 transition hover:text-white hover:ring-white/20"
+                            title="Lautstärke"
+                        >
+                            {volume === 0 ? (
+                                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2" />
+                                </svg>
+                            ) : volume < 0.5 ? (
+                                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M15.536 8.464a5 5 0 010 7.072" />
+                                </svg>
+                            ) : (
+                                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M15.536 8.464a5 5 0 010 7.072M18.364 5.636a9 9 0 010 12.728" />
+                                </svg>
+                            )}
+                        </button>
+
+                        {showVolume && (
+                            <div className="absolute right-0 top-full mt-2 z-50 rounded-xl bg-gray-800/95 p-3 shadow-xl ring-1 ring-white/10 backdrop-blur-xl">
+                                <div className="flex items-center gap-3">
+                                    <button
+                                        onClick={() => handleVolumeChange(volume === 0 ? 1 : 0)}
+                                        className="text-gray-400 hover:text-white transition"
+                                    >
+                                        {volume === 0 ? (
+                                            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                                <path strokeLinecap="round" strokeLinejoin="round" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
+                                                <path strokeLinecap="round" strokeLinejoin="round" d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2" />
+                                            </svg>
+                                        ) : (
+                                            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                                <path strokeLinecap="round" strokeLinejoin="round" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
+                                            </svg>
+                                        )}
+                                    </button>
+                                    <input
+                                        type="range"
+                                        min="0"
+                                        max="1"
+                                        step="0.01"
+                                        value={volume}
+                                        onChange={(e) => handleVolumeChange(parseFloat(e.target.value))}
+                                        className="h-1.5 w-28 cursor-pointer appearance-none rounded-full bg-white/20 accent-green-400"
+                                    />
+                                    <span className="text-xs tabular-nums text-gray-400 w-8 text-right">{Math.round(volume * 100)}%</span>
+                                </div>
+                            </div>
+                        )}
                     </div>
                 </div>
 
@@ -388,118 +444,46 @@ export default function DiscoverPage({ onLogout: _onLogout }: { onLogout: () => 
                         </div>
 
                         {/* Song List */}
-                        <div className="space-y-2">
+                        <div className="space-y-3">
                             {result.songs.map((song, i) => {
                                 const isSaved = savedSongs.has(i);
-                                const isSaving = savingIdx === i;
-                                const isExpanded = expandedIdx === i;
                                 const trackId = extractTrackId(song.spotify_uri);
 
                                 return (
                                     <div
                                         key={i}
-                                        className={`overflow-hidden rounded-xl transition-all ${isSaved
+                                        className={`group overflow-hidden rounded-2xl transition-all duration-300 ${isSaved
                                             ? "bg-green-500/10 ring-1 ring-green-500/30"
                                             : "glass-light hover:ring-1 hover:ring-white/10"
                                             }`}
                                     >
-                                        <div className="flex items-center gap-3 p-3">
-                                            {/* Album Art – click to toggle embed */}
-                                            <button
-                                                onClick={() => trackId && toggleEmbed(i)}
-                                                disabled={!trackId}
-                                                className="group relative h-12 w-12 flex-shrink-0 overflow-hidden rounded-lg bg-gray-800 disabled:cursor-default"
-                                            >
-                                                {song.album_image ? (
-                                                    <img src={song.album_image} alt={song.title} className="h-full w-full object-cover" />
-                                                ) : (
-                                                    <div className="flex h-full w-full items-center justify-center text-lg text-gray-600">🎵</div>
-                                                )}
-                                                {/* Play/Pause overlay */}
-                                                {trackId && (
-                                                    <div className={`absolute inset-0 flex items-center justify-center transition ${isExpanded ? "bg-black/50" : "bg-black/0 group-hover:bg-black/40"}`}>
-                                                        <div className={`transition ${isExpanded ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}>
-                                                            {isExpanded ? (
-                                                                <svg className="h-5 w-5 text-white drop-shadow" fill="currentColor" viewBox="0 0 24 24">
-                                                                    <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z" />
-                                                                </svg>
-                                                            ) : (
-                                                                <svg className="h-5 w-5 text-white drop-shadow ml-0.5" fill="currentColor" viewBox="0 0 24 24">
-                                                                    <path d="M8 5v14l11-7z" />
-                                                                </svg>
-                                                            )}
-                                                        </div>
-                                                    </div>
-                                                )}
-                                                {/* Playing indicator bars */}
-                                                {isExpanded && (
-                                                    <div className="absolute bottom-0.5 left-0.5 right-0.5 flex h-1.5 items-end justify-center gap-[2px]">
-                                                        <div className="w-[3px] animate-bounce rounded-full bg-green-400" style={{ animationDelay: "0ms", height: "6px" }} />
-                                                        <div className="w-[3px] animate-bounce rounded-full bg-green-400" style={{ animationDelay: "150ms", height: "4px" }} />
-                                                        <div className="w-[3px] animate-bounce rounded-full bg-green-400" style={{ animationDelay: "300ms", height: "5px" }} />
-                                                    </div>
-                                                )}
-                                            </button>
-
-                                            {/* Song Info */}
-                                            <div className="min-w-0 flex-1">
-                                                <p className="truncate text-sm font-medium text-gray-100">{song.title}</p>
-                                                <p className="truncate text-xs text-gray-400">{song.artist}</p>
-                                            </div>
-
-                                            {/* Actions */}
-                                            <div className="flex flex-shrink-0 items-center gap-1">
-                                                {/* Save to Liked Songs */}
-                                                <button
-                                                    onClick={() => saveSingleSong(i)}
-                                                    disabled={isSaved || isSaving || !song.spotify_uri}
-                                                    className={`rounded-lg p-2 transition ${isSaved
-                                                        ? "text-green-400"
-                                                        : "text-gray-500 hover:bg-green-500/10 hover:text-green-400"
-                                                        } disabled:cursor-default`}
-                                                    title={isSaved ? "Gespeichert ✓" : "Zu Lieblingssongs hinzufügen"}
-                                                >
-                                                    {isSaving ? (
-                                                        <div className="h-4 w-4 animate-spin rounded-full border-2 border-green-400 border-t-transparent" />
-                                                    ) : (
-                                                        <svg className="h-5 w-5" fill={isSaved ? "currentColor" : "none"} viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                                            <path strokeLinecap="round" strokeLinejoin="round" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
-                                                        </svg>
-                                                    )}
-                                                </button>
-
-                                                {/* Open in Spotify */}
-                                                {song.spotify_url && (
-                                                    <a
-                                                        href={song.spotify_url}
-                                                        target="_blank"
-                                                        rel="noopener noreferrer"
-                                                        className="rounded-lg p-2 text-gray-500 transition hover:bg-green-500/10 hover:text-green-400"
-                                                        title="Auf Spotify öffnen"
-                                                    >
-                                                        <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
-                                                            <path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z" />
-                                                        </svg>
-                                                    </a>
-                                                )}
-                                            </div>
-                                        </div>
-
                                         {/* Spotify Embed Player */}
-                                        {isExpanded && trackId && (
-                                            <div
-                                                className="border-t border-white/5 bg-black/20"
-                                                style={{ animation: "slideDown 200ms ease-out" }}
-                                            >
-                                                <iframe
-                                                    key={`embed-${trackId}-${i}`}
-                                                    src={`https://open.spotify.com/embed/track/${trackId}?utm_source=generator&theme=0`}
-                                                    width="100%"
-                                                    height="80"
-                                                    frameBorder="0"
-                                                    allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
-                                                    style={{ border: "none", display: "block" }}
-                                                />
+                                        {trackId ? (
+                                            <iframe
+                                                key={`embed-${trackId}`}
+                                                src={`https://open.spotify.com/embed/track/${trackId}?utm_source=generator&theme=0`}
+                                                width="100%"
+                                                height="152"
+                                                frameBorder="0"
+                                                allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
+                                                loading="lazy"
+                                                style={{ border: "none", display: "block", borderRadius: "12px" }}
+                                            />
+                                        ) : (
+                                            /* Fallback for songs without Spotify URI */
+                                            <div className="flex items-center gap-4 p-3">
+                                                <div className="h-12 w-12 flex-shrink-0 overflow-hidden rounded-lg bg-gray-800">
+                                                    {song.album_image ? (
+                                                        <img src={song.album_image} alt={song.title} className="h-full w-full object-cover" />
+                                                    ) : (
+                                                        <div className="flex h-full w-full items-center justify-center text-lg text-gray-600">🎵</div>
+                                                    )}
+                                                </div>
+                                                <div className="min-w-0 flex-1">
+                                                    <p className="truncate text-sm font-semibold text-gray-100">{song.title}</p>
+                                                    <p className="truncate text-xs text-gray-400">{song.artist}</p>
+                                                </div>
+                                                <span className="text-xs text-gray-600">Nicht auf Spotify</span>
                                             </div>
                                         )}
                                     </div>
