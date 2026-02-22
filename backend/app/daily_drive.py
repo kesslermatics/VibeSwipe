@@ -32,32 +32,6 @@ GEMINI_URL = (
     f"gemini-3-flash-preview:generateContent?key={settings.gemini_api_key}"
 )
 
-DAILY_DRIVE_PROMPT = """You are a music curation expert building a "Daily Drive" playlist.
-
-I will give you a list of songs that the user currently has on repeat (their favorite songs right now).
-
-Your task:
-1. Pick exactly 20 songs FROM the provided list. Choose a good mix that flows well together.
-2. Recommend exactly 20 NEW songs that are NOT in the provided list but perfectly match the style, mood, genre, and energy of these songs. These should be songs the user would likely enjoy but hasn't discovered yet.
-
-Respond ONLY with valid JSON in this exact format, nothing else:
-{
-  "from_repeat": [
-    {"title": "Song Name", "artist": "Artist Name"},
-    ...
-  ],
-  "new_discoveries": [
-    {"title": "Song Name", "artist": "Artist Name"},
-    ...
-  ]
-}
-
-Rules:
-- "from_repeat" must contain exactly 20 songs that are IN the provided list (use the exact titles/artists given)
-- "new_discoveries" must contain exactly 20 songs NOT in the provided list
-- Mix genres and energies well for a good listening experience
-- Only output valid JSON, no markdown, no explanation"""
-
 
 async def fetch_on_repeat_tracks(spotify_token: str) -> list[dict]:
     """Fetch user's top tracks (short_term ≈ On Repeat, up to 50)."""
@@ -147,10 +121,39 @@ async def ask_gemini_daily_drive(on_repeat_songs: list[dict]) -> dict:
         f"- {s['title']} – {s['artist']}" for s in on_repeat_songs
     )
 
+    num_from_repeat = min(20, len(on_repeat_songs))
+    num_new = 20
+
+    prompt = f"""You are a music curation expert building a "Daily Drive" playlist.
+
+I will give you a list of songs that the user currently has on repeat (their favorite songs right now).
+
+Your task:
+1. Pick exactly {num_from_repeat} songs FROM the provided list. Choose a good mix that flows well together. Use the EXACT titles and artists as given.
+2. Recommend exactly {num_new} NEW songs that are NOT in the provided list but perfectly match the style, mood, genre, and energy of these songs. These should be songs the user would likely enjoy but hasn't discovered yet.
+
+Respond ONLY with valid JSON in this exact format, nothing else:
+{{
+  "from_repeat": [
+    {{"title": "Song Name", "artist": "Artist Name"}},
+    ...
+  ],
+  "new_discoveries": [
+    {{"title": "Song Name", "artist": "Artist Name"}},
+    ...
+  ]
+}}
+
+Rules:
+- "from_repeat" must contain exactly {num_from_repeat} songs that are IN the provided list (use the exact titles/artists given)
+- "new_discoveries" must contain exactly {num_new} songs NOT in the provided list
+- Mix genres and energies well for a good listening experience
+- Only output valid JSON, no markdown, no explanation"""
+
     payload = {
         "contents": [{
             "parts": [
-                {"text": DAILY_DRIVE_PROMPT},
+                {"text": prompt},
                 {"text": f"Here are the user's On-Repeat songs:\n{song_list}"},
             ]
         }],
@@ -160,14 +163,21 @@ async def ask_gemini_daily_drive(on_repeat_songs: list[dict]) -> dict:
         },
     }
 
-    async with httpx.AsyncClient(timeout=30) as client:
+    async with httpx.AsyncClient(timeout=60) as client:
         resp = await client.post(GEMINI_URL, json=payload)
 
     if resp.status_code != 200:
-        raise Exception(f"Gemini API error: {resp.status_code} – {resp.text}")
+        logger.error(f"Gemini API error: {resp.status_code} – {resp.text[:500]}")
+        raise Exception(f"Gemini API error: {resp.status_code} – {resp.text[:200]}")
 
     data = resp.json()
-    text = data["candidates"][0]["content"]["parts"][0]["text"]
+    
+    # Safely extract text from Gemini response
+    try:
+        text = data["candidates"][0]["content"]["parts"][0]["text"]
+    except (KeyError, IndexError) as e:
+        logger.error(f"Unexpected Gemini response structure: {json.dumps(data)[:500]}")
+        raise Exception(f"Unerwartete Gemini-Antwort: {e}")
 
     # Strip markdown code fences if present
     text = text.strip()
@@ -177,18 +187,34 @@ async def ask_gemini_daily_drive(on_repeat_songs: list[dict]) -> dict:
             text = text[:-3]
         text = text.strip()
 
-    return json.loads(text)
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as e:
+        logger.error(f"Gemini returned invalid JSON: {text[:500]}")
+        raise Exception(f"Gemini hat ungültiges JSON zurückgegeben: {e}")
 
 
 async def search_spotify_track(query: str, spotify_token: str) -> dict | None:
     """Search Spotify for a track and return URI + metadata."""
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=15) as client:
         resp = await client.get(
             f"{SPOTIFY_API}/search",
             params={"q": query, "type": "track", "limit": 1},
             headers={"Authorization": f"Bearer {spotify_token}"},
         )
+    if resp.status_code == 429:
+        # Rate limited – wait and retry once
+        retry_after = int(resp.headers.get("Retry-After", "2"))
+        logger.warning(f"Spotify rate limited, waiting {retry_after}s")
+        await asyncio.sleep(retry_after)
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(
+                f"{SPOTIFY_API}/search",
+                params={"q": query, "type": "track", "limit": 1},
+                headers={"Authorization": f"Bearer {spotify_token}"},
+            )
     if resp.status_code != 200:
+        logger.warning(f"Spotify search failed for '{query}': {resp.status_code}")
         return None
 
     items = resp.json().get("tracks", {}).get("items", [])
@@ -214,7 +240,9 @@ async def generate_daily_drive(
     Returns info about the created playlist.
     """
     # 1. Fetch On-Repeat tracks
+    logger.info("Daily Drive: Fetching On-Repeat tracks...")
     on_repeat = await fetch_on_repeat_tracks(spotify_token)
+    logger.info(f"Daily Drive: Got {len(on_repeat)} On-Repeat tracks")
     if len(on_repeat) < 5:
         raise Exception(
             "Du brauchst mindestens 5 Songs in deinen Top Tracks (On Repeat). "
@@ -222,38 +250,66 @@ async def generate_daily_drive(
         )
 
     # 2. Ask Gemini to curate
+    logger.info("Daily Drive: Asking Gemini to curate songs...")
     gemini_result = await ask_gemini_daily_drive(on_repeat)
+    logger.info(
+        f"Daily Drive: Gemini returned {len(gemini_result.get('from_repeat', []))} from_repeat, "
+        f"{len(gemini_result.get('new_discoveries', []))} new_discoveries"
+    )
 
     # 3. Map "from_repeat" songs back to their Spotify URIs
     on_repeat_map = {}
     for t in on_repeat:
-        key = f"{t['title'].lower()}|||{t['artist'].lower()}"
+        key = f"{t['title'].lower().strip()}|||{t['artist'].lower().strip()}"
         on_repeat_map[key] = t
+        # Also store by title only for fuzzy matching
+        title_key = t['title'].lower().strip()
+        if title_key not in on_repeat_map:
+            on_repeat_map[f"title:::{title_key}"] = t
 
     from_repeat_uris: list[str] = []
     for song in gemini_result.get("from_repeat", []):
-        key = f"{song['title'].lower()}|||{song['artist'].lower()}"
+        key = f"{song['title'].lower().strip()}|||{song['artist'].lower().strip()}"
         if key in on_repeat_map:
             from_repeat_uris.append(on_repeat_map[key]["uri"])
         else:
-            # Fuzzy fallback: search on Spotify
-            result = await search_spotify_track(
-                f"{song['title']} {song['artist']}", spotify_token
-            )
-            if result:
-                from_repeat_uris.append(result["uri"])
+            # Try title-only match
+            title_key = f"title:::{song['title'].lower().strip()}"
+            if title_key in on_repeat_map:
+                from_repeat_uris.append(on_repeat_map[title_key]["uri"])
+            else:
+                # Fuzzy fallback: search on Spotify
+                logger.info(f"Daily Drive: from_repeat song not found in map, searching: {song['title']} - {song['artist']}")
+                result = await search_spotify_track(
+                    f"{song['title']} {song['artist']}", spotify_token
+                )
+                if result:
+                    from_repeat_uris.append(result["uri"])
 
-    # 4. Search new discoveries on Spotify
+    logger.info(f"Daily Drive: Resolved {len(from_repeat_uris)} from_repeat URIs")
+
+    # 4. Search new discoveries on Spotify (in batches to avoid rate limits)
     async def resolve_new_song(song: dict) -> str | None:
         result = await search_spotify_track(
             f"{song['title']} {song['artist']}", spotify_token
         )
         return result["uri"] if result else None
 
-    new_uris_raw = await asyncio.gather(
-        *(resolve_new_song(s) for s in gemini_result.get("new_discoveries", []))
-    )
-    new_discovery_uris = [u for u in new_uris_raw if u]
+    logger.info("Daily Drive: Resolving new discoveries on Spotify...")
+    new_discovery_uris: list[str] = []
+    new_songs = gemini_result.get("new_discoveries", [])
+    # Process in batches of 5 to avoid Spotify rate limits
+    for batch_start in range(0, len(new_songs), 5):
+        batch = new_songs[batch_start:batch_start + 5]
+        batch_results = await asyncio.gather(
+            *(resolve_new_song(s) for s in batch)
+        )
+        new_discovery_uris.extend(u for u in batch_results if u)
+        # Small delay between batches
+        if batch_start + 5 < len(new_songs):
+            await asyncio.sleep(0.2)
+
+    logger.info(f"Daily Drive: Resolved {len(new_discovery_uris)} new discovery URIs")
 
     # 5. Combine: shuffle both sets for variety
     random.shuffle(from_repeat_uris)
@@ -314,6 +370,7 @@ async def generate_daily_drive(
             ep_idx += 1
 
     # 8. Create the Spotify playlist
+    logger.info(f"Daily Drive: Creating playlist with {len(final_uris)} items...")
     today = date.today().strftime("%d.%m.%Y")
     playlist_name = f"Daily Drive – {today}"
     playlist_desc = (
