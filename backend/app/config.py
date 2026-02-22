@@ -7,7 +7,7 @@ class Settings(BaseSettings):
     secret_key: str = "change-me"
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 60
-    cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,https://spotivibe.kesslermatics.com/"
+    cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,https://spotivibe.kesslermatics.com"
     spotify_client_id: str = ""
     spotify_client_secret: str = ""
     spotify_redirect_uri: str = "http://127.0.0.1:5173/callback,https://vibeswipe.kesslermatics.com/callback"
