@@ -17,7 +17,6 @@ import json
 import random
 import asyncio
 import logging
-import time
 from datetime import date
 
 import httpx
@@ -195,56 +194,31 @@ Rules:
         raise Exception(f"Gemini hat ungültiges JSON zurückgegeben: {e}")
 
 
-def _parse_retry_after(headers: dict) -> float:
-    """Parse Retry-After header – can be seconds or a Unix timestamp."""
-    raw = headers.get("Retry-After", "2")
-    try:
-        value = int(raw)
-    except ValueError:
-        return 2.0
-    # If the value is absurdly large, it's a Unix timestamp, not seconds
-    if value > 300:
-        wait = max(0, value - int(time.time()))
-        return min(wait, 30)  # cap at 30s to be safe
-    return min(value, 30)
+async def search_spotify_track(query: str, spotify_token: str, client: httpx.AsyncClient | None = None) -> dict | None:
+    """Search Spotify for a track and return URI + metadata."""
+    headers = {"Authorization": f"Bearer {spotify_token}"}
+    params = {"q": query, "type": "track", "limit": 1}
 
-
-async def search_spotify_track(query: str, spotify_token: str) -> dict | None:
-    """Search Spotify for a track and return URI + metadata.
-    Retries up to 3 times with exponential backoff on rate limits."""
-    for attempt in range(3):
-        async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.get(
-                f"{SPOTIFY_API}/search",
-                params={"q": query, "type": "track", "limit": 1},
-                headers={"Authorization": f"Bearer {spotify_token}"},
-            )
-        if resp.status_code == 429:
-            wait = _parse_retry_after(dict(resp.headers))
-            # Exponential backoff: 3s, 6s, 12s
-            backoff = max(wait, 3 * (2 ** attempt))
-            logger.warning(f"Spotify 429 (attempt {attempt+1}/3), waiting {backoff:.0f}s for: {query}")
-            await asyncio.sleep(backoff)
-            continue
+    async def _do_search(c: httpx.AsyncClient) -> dict | None:
+        resp = await c.get(f"{SPOTIFY_API}/search", params=params, headers=headers)
         if resp.status_code != 200:
-            logger.warning(f"Spotify search failed for '{query}': {resp.status_code}")
             return None
-        break
+        items = resp.json().get("tracks", {}).get("items", [])
+        if not items:
+            return None
+        track = items[0]
+        return {
+            "title": track["name"],
+            "artist": ", ".join(a["name"] for a in track["artists"]),
+            "uri": track["uri"],
+            "id": track["id"],
+        }
+
+    if client:
+        return await _do_search(client)
     else:
-        logger.warning(f"Spotify search gave up after 3 retries for '{query}'")
-        return None
-
-    items = resp.json().get("tracks", {}).get("items", [])
-    if not items:
-        return None
-
-    track = items[0]
-    return {
-        "title": track["name"],
-        "artist": ", ".join(a["name"] for a in track["artists"]),
-        "uri": track["uri"],
-        "id": track["id"],
-    }
+        async with httpx.AsyncClient(timeout=15) as c:
+            return await _do_search(c)
 
 
 async def generate_daily_drive(
@@ -274,52 +248,65 @@ async def generate_daily_drive(
         f"{len(gemini_result.get('new_discoveries', []))} new_discoveries"
     )
 
-    # 3. Map "from_repeat" songs back to their Spotify URIs
+    # 3. Map "from_repeat" songs back to their Spotify URIs (no API calls needed)
     on_repeat_map = {}
     for t in on_repeat:
         key = f"{t['title'].lower().strip()}|||{t['artist'].lower().strip()}"
         on_repeat_map[key] = t
         # Also store by title only for fuzzy matching
-        title_key = t['title'].lower().strip()
+        title_key = f"title:::{t['title'].lower().strip()}"
         if title_key not in on_repeat_map:
-            on_repeat_map[f"title:::{title_key}"] = t
+            on_repeat_map[title_key] = t
 
     from_repeat_uris: list[str] = []
+    unmatched_from_repeat: list[dict] = []
     for song in gemini_result.get("from_repeat", []):
         key = f"{song['title'].lower().strip()}|||{song['artist'].lower().strip()}"
         if key in on_repeat_map:
             from_repeat_uris.append(on_repeat_map[key]["uri"])
         else:
-            # Try title-only match
             title_key = f"title:::{song['title'].lower().strip()}"
             if title_key in on_repeat_map:
                 from_repeat_uris.append(on_repeat_map[title_key]["uri"])
             else:
-                # Fuzzy fallback: search on Spotify
-                logger.info(f"Daily Drive: from_repeat song not found in map, searching: {song['title']} - {song['artist']}")
-                result = await search_spotify_track(
-                    f"{song['title']} {song['artist']}", spotify_token
-                )
-                if result:
-                    from_repeat_uris.append(result["uri"])
+                unmatched_from_repeat.append(song)
 
-    logger.info(f"Daily Drive: Resolved {len(from_repeat_uris)} from_repeat URIs")
+    logger.info(f"Daily Drive: Matched {len(from_repeat_uris)} from_repeat directly, {len(unmatched_from_repeat)} need search")
 
-    # 4. Search new discoveries on Spotify (sequentially to avoid rate limits)
-    logger.info("Daily Drive: Resolving new discoveries on Spotify...")
-    new_discovery_uris: list[str] = []
-    new_songs = gemini_result.get("new_discoveries", [])
-    for i, song in enumerate(new_songs):
+    # 4. Search unmatched from_repeat + all new discoveries on Spotify
+    #    Use a single shared client and parallel requests (same pattern as discover.py)
+    all_to_search: list[dict] = []
+    # Tag each search so we know where to put the result
+    for song in unmatched_from_repeat:
+        all_to_search.append({"song": song, "type": "from_repeat"})
+    for song in gemini_result.get("new_discoveries", []):
+        all_to_search.append({"song": song, "type": "new_discovery"})
+
+    logger.info(f"Daily Drive: Searching {len(all_to_search)} songs on Spotify (parallel)...")
+
+    async def _search_one(item: dict, client: httpx.AsyncClient) -> tuple[str, str | None]:
+        song = item["song"]
         result = await search_spotify_track(
-            f"{song['title']} {song['artist']}", spotify_token
+            f"{song['title']} {song['artist']}", spotify_token, client=client
         )
-        if result:
-            new_discovery_uris.append(result["uri"])
-        # Small delay between each request
-        if i < len(new_songs) - 1:
-            await asyncio.sleep(0.3)
+        return (item["type"], result["uri"] if result else None)
 
-    logger.info(f"Daily Drive: Resolved {len(new_discovery_uris)} new discovery URIs")
+    new_discovery_uris: list[str] = []
+
+    async with httpx.AsyncClient(timeout=30) as client:
+        results = await asyncio.gather(
+            *(_search_one(item, client) for item in all_to_search)
+        )
+
+    for typ, uri in results:
+        if uri is None:
+            continue
+        if typ == "from_repeat":
+            from_repeat_uris.append(uri)
+        else:
+            new_discovery_uris.append(uri)
+
+    logger.info(f"Daily Drive: Final counts – {len(from_repeat_uris)} from_repeat, {len(new_discovery_uris)} new discoveries")
 
     # 5. Combine: shuffle both sets for variety
     random.shuffle(from_repeat_uris)
@@ -390,13 +377,12 @@ async def generate_daily_drive(
         f"{f', {len(episode_uris)} Podcast-Folgen' if episode_uris else ''}"
     )
 
-    headers = {"Authorization": f"Bearer {spotify_token}"}
+    auth_headers = {"Authorization": f"Bearer {spotify_token}"}
 
     async with httpx.AsyncClient() as client:
-        # Create playlist via /me/playlists (avoids 403 with /users/{id}/playlists)
         create_resp = await client.post(
             f"{SPOTIFY_API}/me/playlists",
-            headers=headers,
+            headers=auth_headers,
             json={
                 "name": playlist_name,
                 "description": playlist_desc,
@@ -404,23 +390,22 @@ async def generate_daily_drive(
             },
         )
 
-    if create_resp.status_code not in (200, 201):
-        raise Exception(f"Playlist konnte nicht erstellt werden: {create_resp.text}")
+        if create_resp.status_code not in (200, 201):
+            raise Exception(f"Playlist konnte nicht erstellt werden: {create_resp.text}")
 
-    playlist = create_resp.json()
-    playlist_id = playlist["id"]
+        playlist = create_resp.json()
+        playlist_id = playlist["id"]
 
-    # Add items in chunks of 100
-    for i in range(0, len(final_uris), 100):
-        chunk = final_uris[i: i + 100]
-        async with httpx.AsyncClient() as client:
+        # Add items in chunks of 100
+        for i in range(0, len(final_uris), 100):
+            chunk = final_uris[i: i + 100]
             add_resp = await client.post(
                 f"{SPOTIFY_API}/playlists/{playlist_id}/items",
-                headers=headers,
+                headers=auth_headers,
                 json={"uris": chunk},
             )
-        if add_resp.status_code not in (200, 201):
-            logger.error(f"Failed to add items to playlist: {add_resp.status_code} {add_resp.text[:300]}")
+            if add_resp.status_code not in (200, 201):
+                logger.error(f"Failed to add items to playlist: {add_resp.status_code} {add_resp.text[:300]}")
 
     return {
         "playlist_url": playlist["external_urls"]["spotify"],
