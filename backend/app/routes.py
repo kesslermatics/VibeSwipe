@@ -287,7 +287,7 @@ async def create_playlist(
         async with httpx.AsyncClient() as client:
             # 1. Create an empty playlist on the user's account
             create_resp = await client.post(
-                f"{SPOTIFY_API_BASE}/users/{current_user.spotify_id}/playlists",
+                f"{SPOTIFY_API_BASE}/me/playlists",
                 headers=headers,
                 json={
                     "name": payload.name,
@@ -373,7 +373,7 @@ async def save_tracks(
         # 2. Fallback: Create a playlist instead
         async with httpx.AsyncClient() as client:
             create_resp = await client.post(
-                f"{SPOTIFY_API_BASE}/users/{current_user.spotify_id}/playlists",
+                f"{SPOTIFY_API_BASE}/me/playlists",
                 headers=headers,
                 json={
                     "name": f"SpotiVibe Discover – {len(track_uris)} Songs",

@@ -195,10 +195,6 @@ Rules:
         raise Exception(f"Gemini hat ungültiges JSON zurückgegeben: {e}")
 
 
-# Limit concurrent Spotify API requests to avoid rate limiting
-_spotify_semaphore = asyncio.Semaphore(3)
-
-
 def _parse_retry_after(headers: dict) -> float:
     """Parse Retry-After header – can be seconds or a Unix timestamp."""
     raw = headers.get("Retry-After", "2")
@@ -214,8 +210,9 @@ def _parse_retry_after(headers: dict) -> float:
 
 
 async def search_spotify_track(query: str, spotify_token: str) -> dict | None:
-    """Search Spotify for a track and return URI + metadata."""
-    async with _spotify_semaphore:
+    """Search Spotify for a track and return URI + metadata.
+    Retries up to 3 times with exponential backoff on rate limits."""
+    for attempt in range(3):
         async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.get(
                 f"{SPOTIFY_API}/search",
@@ -224,17 +221,18 @@ async def search_spotify_track(query: str, spotify_token: str) -> dict | None:
             )
         if resp.status_code == 429:
             wait = _parse_retry_after(dict(resp.headers))
-            logger.warning(f"Spotify rate limited, waiting {wait:.1f}s for: {query}")
-            await asyncio.sleep(wait)
-            async with httpx.AsyncClient(timeout=15) as client:
-                resp = await client.get(
-                    f"{SPOTIFY_API}/search",
-                    params={"q": query, "type": "track", "limit": 1},
-                    headers={"Authorization": f"Bearer {spotify_token}"},
-                )
+            # Exponential backoff: 3s, 6s, 12s
+            backoff = max(wait, 3 * (2 ** attempt))
+            logger.warning(f"Spotify 429 (attempt {attempt+1}/3), waiting {backoff:.0f}s for: {query}")
+            await asyncio.sleep(backoff)
+            continue
         if resp.status_code != 200:
             logger.warning(f"Spotify search failed for '{query}': {resp.status_code}")
             return None
+        break
+    else:
+        logger.warning(f"Spotify search gave up after 3 retries for '{query}'")
+        return None
 
     items = resp.json().get("tracks", {}).get("items", [])
     if not items:
@@ -307,26 +305,19 @@ async def generate_daily_drive(
 
     logger.info(f"Daily Drive: Resolved {len(from_repeat_uris)} from_repeat URIs")
 
-    # 4. Search new discoveries on Spotify (in batches to avoid rate limits)
-    async def resolve_new_song(song: dict) -> str | None:
-        result = await search_spotify_track(
-            f"{song['title']} {song['artist']}", spotify_token
-        )
-        return result["uri"] if result else None
-
+    # 4. Search new discoveries on Spotify (sequentially to avoid rate limits)
     logger.info("Daily Drive: Resolving new discoveries on Spotify...")
     new_discovery_uris: list[str] = []
     new_songs = gemini_result.get("new_discoveries", [])
-    # Process in batches of 3 to avoid Spotify rate limits
-    for batch_start in range(0, len(new_songs), 3):
-        batch = new_songs[batch_start:batch_start + 3]
-        batch_results = await asyncio.gather(
-            *(resolve_new_song(s) for s in batch)
+    for i, song in enumerate(new_songs):
+        result = await search_spotify_track(
+            f"{song['title']} {song['artist']}", spotify_token
         )
-        new_discovery_uris.extend(u for u in batch_results if u)
-        # Delay between batches to stay under rate limits
-        if batch_start + 3 < len(new_songs):
-            await asyncio.sleep(0.5)
+        if result:
+            new_discovery_uris.append(result["uri"])
+        # Small delay between each request
+        if i < len(new_songs) - 1:
+            await asyncio.sleep(0.3)
 
     logger.info(f"Daily Drive: Resolved {len(new_discovery_uris)} new discovery URIs")
 
@@ -402,9 +393,9 @@ async def generate_daily_drive(
     headers = {"Authorization": f"Bearer {spotify_token}"}
 
     async with httpx.AsyncClient() as client:
-        # Create playlist
+        # Create playlist via /me/playlists (avoids 403 with /users/{id}/playlists)
         create_resp = await client.post(
-            f"{SPOTIFY_API}/users/{spotify_user_id}/playlists",
+            f"{SPOTIFY_API}/me/playlists",
             headers=headers,
             json={
                 "name": playlist_name,
