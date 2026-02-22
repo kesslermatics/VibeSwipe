@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,https://spotivibe.kesslermatics.com"
     spotify_client_id: str = ""
     spotify_client_secret: str = ""
-    spotify_redirect_uri: str = "http://127.0.0.1:5173/callback,https://vibeswipe.kesslermatics.com/callback"
+    spotify_redirect_uri: str = "http://127.0.0.1:5173/callback,https://spotivibe.kesslermatics.com/callback"
     gemini_api_key: str = ""
     redis_url: str = ""
 

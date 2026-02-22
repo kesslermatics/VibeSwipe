@@ -8,7 +8,7 @@ export default function LoginPage() {
         setLoading(true);
         try {
             // Normalize localhost → 127.0.0.1 (Spotify requires http://127.0.0.1 for local dev)
-            const origin = window.location.origin.replace("://localhost:", "://127.0.0.1:");
+            const origin = "https://spotivibe.kesslermatics.com";
             const redirectUri = `${origin}/callback`;
             const data = await api<{ url: string; redirect_uri: string }>(
                 `/auth/login?redirect_uri=${encodeURIComponent(redirectUri)}`
