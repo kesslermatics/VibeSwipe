@@ -224,22 +224,17 @@ Rules:
         raise Exception(f"Gemini hat ungültiges JSON zurückgegeben: {e}")
 
 
-async def search_spotify_track(query: str, spotify_token: str) -> dict | None:
-    """Search Spotify for a track and return URI + metadata.
-    
-    Retries once on 429 (rate limit) after a short wait.
-    """
+async def robust_spotify_search(query: str, spotify_token: str, max_retries: int = 3) -> dict | None:
+    """Spotify-Search mit Retry-After und Logging bei 429."""
     headers = {"Authorization": f"Bearer {spotify_token}"}
     params = {"q": query, "type": "track", "limit": 1}
-
-    for attempt in range(3):
+    for attempt in range(max_retries):
         async with httpx.AsyncClient() as client:
             resp = await client.get(
                 f"{SPOTIFY_API}/search",
                 params=params,
                 headers=headers,
             )
-
         if resp.status_code == 200:
             items = resp.json().get("tracks", {}).get("items", [])
             if not items:
@@ -251,23 +246,44 @@ async def search_spotify_track(query: str, spotify_token: str) -> dict | None:
                 "uri": track["uri"],
                 "id": track["id"],
             }
-
         if resp.status_code == 429:
-            # Parse Retry-After header (seconds to wait)
             retry_after = resp.headers.get("Retry-After", "3")
             try:
-                wait = min(int(retry_after), 10)  # Cap at 10s in case it's a timestamp
+                wait = min(int(retry_after), 30)
             except ValueError:
                 wait = 3
-            logger.info(f"Rate limited on '{query}', waiting {wait}s (attempt {attempt + 1}/3)")
+            logger.warning(f"Spotify search 429 for '{query}', Retry-After={retry_after}s, waiting {wait}s (attempt {attempt+1}/{max_retries})")
             await asyncio.sleep(wait)
             continue
-
         logger.warning(f"Spotify search failed for '{query}': {resp.status_code}")
         return None
-
-    logger.warning(f"Spotify search gave up after 3 retries for '{query}'")
+    logger.error(f"Spotify search gave up after {max_retries} retries for '{query}'")
     return None
+
+
+async def robust_add_items_to_playlist(client, playlist_id, chunk, auth_headers, max_retries=3):
+    """Add items to playlist with Retry-After handling and logging."""
+    for attempt in range(max_retries):
+        add_resp = await client.post(
+            f"{SPOTIFY_API}/playlists/{playlist_id}/items",
+            headers=auth_headers,
+            json={"uris": chunk},
+        )
+        if add_resp.status_code in (200, 201):
+            return True
+        if add_resp.status_code == 429:
+            retry_after = add_resp.headers.get("Retry-After", "3")
+            try:
+                wait = min(int(retry_after), 30)
+            except ValueError:
+                wait = 3
+            logger.warning(f"Playlist add 429, Retry-After={retry_after}s, waiting {wait}s (attempt {attempt+1}/{max_retries})")
+            await asyncio.sleep(wait)
+            continue
+        logger.error(f"Failed to add items to playlist: {add_resp.status_code} {add_resp.text[:300]}")
+        return False
+    logger.error(f"Failed to add items after {max_retries} retries.")
+    return False
 
 
 async def generate_daily_drive(
@@ -354,24 +370,9 @@ async def generate_daily_drive(
     results: list[tuple[str, str | None]] = []
     for item in all_to_search:
         song = item["song"]
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(
-                f"{SPOTIFY_API}/search",
-                params={"q": f"{song['title']} {song['artist']}", "type": "track", "limit": 1},
-                headers={"Authorization": f"Bearer {spotify_token}"},
-            )
-        if resp.status_code != 200:
-            logger.warning(f"Spotify search failed for '{song['title']} {song['artist']}': {resp.status_code}")
-            results.append((item["type"], None))
-            await asyncio.sleep(1.2)  # Kurze Pause nach Fehler
-            continue
-        items = resp.json().get("tracks", {}).get("items", [])
-        if not items:
-            results.append((item["type"], None))
-            await asyncio.sleep(1.2)
-            continue
-        track = items[0]
-        results.append((item["type"], track["uri"]))
+        search_result = await robust_spotify_search(f"{song['title']} {song['artist']}", spotify_token)
+        uri = search_result["uri"] if search_result else None
+        results.append((item["type"], uri))
         await asyncio.sleep(1.2)  # Kurze Pause nach jedem Call
 
     for typ, uri in results:
@@ -478,13 +479,9 @@ async def generate_daily_drive(
         # Add items in chunks of 100
         for i in range(0, len(final_uris), 100):
             chunk = final_uris[i: i + 100]
-            add_resp = await client.post(
-                f"{SPOTIFY_API}/playlists/{playlist_id}/items",
-                headers=auth_headers,
-                json={"uris": chunk},
-            )
-            if add_resp.status_code not in (200, 201):
-                logger.error(f"Failed to add items to playlist: {add_resp.status_code} {add_resp.text[:300]}")
+            success = await robust_add_items_to_playlist(client, playlist_id, chunk, auth_headers)
+            if not success:
+                logger.error(f"Failed to add chunk {i}-{i+len(chunk)} to playlist after retries.")
 
     return {
         "playlist_url": playlist["external_urls"]["spotify"],
