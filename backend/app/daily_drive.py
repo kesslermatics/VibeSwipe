@@ -224,31 +224,33 @@ Rules:
         raise Exception(f"Gemini hat ungültiges JSON zurückgegeben: {e}")
 
 
-async def search_spotify_track(query: str, spotify_token: str, client: httpx.AsyncClient | None = None) -> dict | None:
-    """Search Spotify for a track and return URI + metadata."""
-    headers = {"Authorization": f"Bearer {spotify_token}"}
-    params = {"q": query, "type": "track", "limit": 1}
+async def search_spotify_track(query: str, spotify_token: str) -> dict | None:
+    """Search Spotify for a track and return URI + metadata.
+    
+    Uses the same pattern as discover.py – one client per search.
+    """
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(
+            f"{SPOTIFY_API}/search",
+            params={"q": query, "type": "track", "limit": 1},
+            headers={"Authorization": f"Bearer {spotify_token}"},
+        )
 
-    async def _do_search(c: httpx.AsyncClient) -> dict | None:
-        resp = await c.get(f"{SPOTIFY_API}/search", params=params, headers=headers)
-        if resp.status_code != 200:
-            return None
-        items = resp.json().get("tracks", {}).get("items", [])
-        if not items:
-            return None
-        track = items[0]
-        return {
-            "title": track["name"],
-            "artist": ", ".join(a["name"] for a in track["artists"]),
-            "uri": track["uri"],
-            "id": track["id"],
-        }
+    if resp.status_code != 200:
+        logger.warning(f"Spotify search failed for '{query}': {resp.status_code}")
+        return None
 
-    if client:
-        return await _do_search(client)
-    else:
-        async with httpx.AsyncClient(timeout=15) as c:
-            return await _do_search(c)
+    items = resp.json().get("tracks", {}).get("items", [])
+    if not items:
+        return None
+
+    track = items[0]
+    return {
+        "title": track["name"],
+        "artist": ", ".join(a["name"] for a in track["artists"]),
+        "uri": track["uri"],
+        "id": track["id"],
+    }
 
 
 async def generate_daily_drive(
@@ -314,19 +316,18 @@ async def generate_daily_drive(
 
     logger.info(f"Daily Drive: Searching {len(all_to_search)} songs on Spotify (parallel)...")
 
-    async def _search_one(item: dict, client: httpx.AsyncClient) -> tuple[str, str | None]:
+    async def _search_one(item: dict) -> tuple[str, str | None]:
         song = item["song"]
         result = await search_spotify_track(
-            f"{song['title']} {song['artist']}", spotify_token, client=client
+            f"{song['title']} {song['artist']}", spotify_token
         )
         return (item["type"], result["uri"] if result else None)
 
     new_discovery_uris: list[str] = []
 
-    async with httpx.AsyncClient(timeout=30) as client:
-        results = await asyncio.gather(
-            *(_search_one(item, client) for item in all_to_search)
-        )
+    results = await asyncio.gather(
+        *(_search_one(item) for item in all_to_search)
+    )
 
     for typ, uri in results:
         if uri is None:
