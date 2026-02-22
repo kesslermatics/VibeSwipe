@@ -341,18 +341,19 @@ async def generate_daily_drive(
     logger.info(f"Daily Drive: Matched {len(from_repeat_uris)} from_repeat directly, {len(unmatched_from_repeat)} need search")
 
     # 5. Search unmatched from_repeat + all new discoveries on Spotify
-    #    EXAKT wie discover.py: alle Suchen parallel, jede mit eigenem Client, kein Batch, kein Retry
+    #    SEQUENTIELL: Jeder Song wird einzeln gesucht, mit kurzem Delay
     all_to_search: list[dict] = []
     for song in unmatched_from_repeat:
         all_to_search.append({"song": song, "type": "from_repeat"})
     for song in gemini_result.get("new_discoveries", []):
         all_to_search.append({"song": song, "type": "new_discovery"})
 
-    logger.info(f"Daily Drive: Searching {len(all_to_search)} songs on Spotify (parallel, discover.py pattern)...")
+    logger.info(f"Daily Drive: Searching {len(all_to_search)} songs on Spotify (sequentiell)...")
 
-    async def _search_one(item: dict) -> tuple[str, str | None]:
+    new_discovery_uris: list[str] = []
+    results: list[tuple[str, str | None]] = []
+    for item in all_to_search:
         song = item["song"]
-        # EXAKT wie discover.py: neuer Client pro Suche, kein Retry
         async with httpx.AsyncClient() as client:
             resp = await client.get(
                 f"{SPOTIFY_API}/search",
@@ -361,18 +362,18 @@ async def generate_daily_drive(
             )
         if resp.status_code != 200:
             logger.warning(f"Spotify search failed for '{song['title']} {song['artist']}': {resp.status_code}")
-            return (item["type"], None)
+            results.append((item["type"], None))
+            await asyncio.sleep(1.2)  # Kurze Pause nach Fehler
+            continue
         items = resp.json().get("tracks", {}).get("items", [])
         if not items:
-            return (item["type"], None)
+            results.append((item["type"], None))
+            await asyncio.sleep(1.2)
+            continue
         track = items[0]
-        return (item["type"], track["uri"])
+        results.append((item["type"], track["uri"]))
+        await asyncio.sleep(1.2)  # Kurze Pause nach jedem Call
 
-    results = await asyncio.gather(
-        *(_search_one(item) for item in all_to_search)
-    )
-
-    new_discovery_uris: list[str] = []
     for typ, uri in results:
         if uri is None:
             continue
