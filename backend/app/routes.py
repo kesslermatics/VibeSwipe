@@ -10,10 +10,11 @@ logger = logging.getLogger(__name__)
 from app.config import get_settings
 from app.database import get_db
 from app.models import User
-from app.schemas import SpotifyCallback, Token, UserResponse, MessageResponse, DiscoverRequest, DiscoverResponse, CreatePlaylistRequest, CreatePlaylistResponse, SaveTracksRequest, SaveTracksResponse, DailyDriveRequest, DailyDriveResponse
+from app.schemas import SpotifyCallback, Token, UserResponse, MessageResponse, DiscoverRequest, DiscoverResponse, CreatePlaylistRequest, CreatePlaylistResponse, SaveTracksRequest, SaveTracksResponse, DailyDriveRequest, DailyDriveResponse, GymPlaylistRequest, GymPlaylistResponse
 from app.auth import create_access_token, get_current_user, get_valid_spotify_token, refresh_spotify_token
 from app.discover import discover_songs
 from app.daily_drive import fetch_saved_shows, generate_daily_drive
+from app.gym_playlist import generate_gym_playlist
 
 router = APIRouter()
 settings = get_settings()
@@ -454,6 +455,16 @@ async def generate_daily_drive_playlist(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Daily Drive Erstellung fehlgeschlagen: {str(e)}",
         )
+
+
+# ── Gym Playlist: Generate ───────────────────────────
+@router.post("/gym-playlist", response_model=GymPlaylistResponse)
+async def gym_playlist(
+    payload: GymPlaylistRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    return await generate_gym_playlist(payload, current_user, db)
 
 
 # ── Health check ──────────────────────────────────────

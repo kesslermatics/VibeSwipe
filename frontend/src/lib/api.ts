@@ -31,3 +31,18 @@ export async function api<T>(
 
   return res.json();
 }
+
+export async function getUserPlaylists() {
+  const token = localStorage.getItem("token") || "";
+  const res = await api<{ playlists: any[] }>("/my-playlists", { token });
+  return res.playlists;
+}
+
+export async function createGymPlaylist(playlistIds: string[]) {
+  const token = localStorage.getItem("token") || "";
+  return api<{ message: string }>("/gym-playlist", {
+    method: "POST",
+    body: { playlist_ids: playlistIds },
+    token,
+  });
+}

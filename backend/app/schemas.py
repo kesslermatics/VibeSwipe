@@ -81,3 +81,17 @@ class DailyDriveResponse(BaseModel):
     on_repeat_count: int
     new_discoveries_count: int
     episodes_count: int
+
+
+# ── Gym Playlist ─────────────────────────────────────
+class GymPlaylistRequest(BaseModel):
+    playlist_ids: list[str]
+
+
+class GymPlaylistResponse(BaseModel):
+    playlist_url: str
+    playlist_id: str
+    name: str
+    total_tracks: int
+    inspiration_songs: list[str]
+    gemini_prompt: str
