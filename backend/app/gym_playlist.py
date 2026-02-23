@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from app.auth import get_current_user, get_valid_spotify_token
 from app.models import User
 from app.schemas import GymPlaylistRequest, GymPlaylistResponse
-from app.config import get_db
+from app.database import get_db
 from app.discover import ask_gemini
 import random
 
