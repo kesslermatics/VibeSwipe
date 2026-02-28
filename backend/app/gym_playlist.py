@@ -416,6 +416,7 @@ async def generate_gym_playlist(
 
     auth_headers = {"Authorization": f"Bearer {spotify_token}"}
 
+    # 6a. Create playlist (eigener Client – wie in routes.py)
     async with httpx.AsyncClient() as client:
         create_resp = await client.post(
             f"{SPOTIFY_API}/me/playlists",
@@ -427,24 +428,34 @@ async def generate_gym_playlist(
             },
         )
 
-        if create_resp.status_code not in (200, 201):
-            logger.error(
-                f"Gym Playlist: Playlist creation failed: {create_resp.status_code} {create_resp.text[:500]}"
-            )
-            raise Exception(
-                f"Playlist konnte nicht erstellt werden: HTTP {create_resp.status_code} – {create_resp.text[:300]}"
-            )
+    if create_resp.status_code not in (200, 201):
+        logger.error(
+            f"Gym Playlist: Playlist creation failed: {create_resp.status_code} {create_resp.text[:500]}"
+        )
+        raise Exception(
+            f"Playlist konnte nicht erstellt werden: HTTP {create_resp.status_code} – {create_resp.text[:300]}"
+        )
 
-        playlist = create_resp.json()
-        playlist_id = playlist["id"]
+    playlist = create_resp.json()
+    playlist_id = playlist["id"]
 
-        for i in range(0, len(uris), 100):
-            chunk = uris[i : i + 100]
-            success = await robust_add_items(
-                client, playlist_id, chunk, auth_headers
+    # 6b. Add tracks in chunks of 100 (eigener Client pro Chunk – wie in routes.py)
+    for i in range(0, len(uris), 100):
+        chunk = uris[i : i + 100]
+        async with httpx.AsyncClient() as client:
+            add_resp = await client.post(
+                f"{SPOTIFY_API}/playlists/{playlist_id}/tracks",
+                headers=auth_headers,
+                json={"uris": chunk},
             )
-            if not success:
-                logger.error(f"Failed to add chunk {i} to gym playlist")
+        if add_resp.status_code not in (200, 201):
+            print(
+                f"[GYM DEBUG] Failed to add tracks chunk {i}: "
+                f"status={add_resp.status_code} body={add_resp.text[:500]}"
+            )
+            logger.error(f"Failed to add tracks chunk {i}: {add_resp.status_code}")
+        else:
+            print(f"[GYM DEBUG] Added chunk {i} ({len(chunk)} tracks) to playlist")
 
     # 7. Save/update settings in DB
     auto_refresh_val = False
