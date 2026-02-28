@@ -92,6 +92,7 @@ async def fetch_playlist_tracks(
                 logger.warning(
                     f"fetch_playlist_tracks({playlist_id}): 403 Forbidden – "
                     f"playlist is likely Spotify-generated or inaccessible in Dev Mode. "
+                    f"OR: Missing scopes. Please try re-logging in via Spotify! "
                     f"Skipping. Response: {resp.text[:300]}"
                 )
                 return tracks, current_token  # Return what we have (possibly empty)
