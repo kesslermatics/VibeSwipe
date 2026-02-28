@@ -45,7 +45,7 @@ export interface SwipeTrack {
   artist: string;
   album: string;
   album_image: string | null;
-  preview_url: string;
+  preview_url: string | null;
   spotify_uri: string;
 }
 
@@ -60,6 +60,15 @@ export async function saveTrack(trackId: string, playlistId: string): Promise<vo
   await api(`/library/save?playlist_id=${encodeURIComponent(playlistId)}`, {
     method: "POST",
     body: { track_ids: [trackId] },
+    token,
+  });
+}
+
+export async function skipSwipeTracks(playlistId: string, songs: string[]): Promise<void> {
+  const token = localStorage.getItem("token") || "";
+  await api(`/discover/swipe/skip?playlist_id=${encodeURIComponent(playlistId)}`, {
+    method: "POST",
+    body: { songs },
     token,
   });
 }

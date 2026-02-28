@@ -114,7 +114,7 @@ class SwipeTrack(BaseModel):
     artist: str
     album: str
     album_image: str | None = None
-    preview_url: str
+    preview_url: str | None = None
     spotify_uri: str
 
 

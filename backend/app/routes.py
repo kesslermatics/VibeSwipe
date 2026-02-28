@@ -556,6 +556,31 @@ SWIPE_GEMINI_URL = (
     f"gemini-3-flash-preview:generateContent?key={settings.gemini_api_key}"
 )
 
+import redis as _redis
+_swipe_redis = _redis.Redis.from_url(settings.redis_url, decode_responses=True)
+SWIPE_SKIP_TTL = 7 * 86400  # 7 days
+
+
+def _get_swipe_skips(user_id: int, playlist_id: str) -> set[str]:
+    """Get skipped song keys from Redis for this user+playlist."""
+    key = f"swipe_skip:{user_id}:{playlist_id}"
+    try:
+        return set(_swipe_redis.smembers(key))
+    except Exception:
+        return set()
+
+
+def _save_swipe_skips(user_id: int, playlist_id: str, skipped: list[str]) -> None:
+    """Save skipped songs (title - artist) to Redis set."""
+    if not skipped:
+        return
+    key = f"swipe_skip:{user_id}:{playlist_id}"
+    try:
+        _swipe_redis.sadd(key, *skipped)
+        _swipe_redis.expire(key, SWIPE_SKIP_TTL)
+    except Exception as e:
+        print(f"SWIPE: Redis save failed: {e}")
+
 
 @router.get("/discover/swipe", response_model=SwipeDeckResponse)
 async def get_swipe_deck(
@@ -568,7 +593,7 @@ async def get_swipe_deck(
     headers = {"Authorization": f"Bearer {spotify_token}"}
 
     try:
-        import asyncio, random, re as _re
+        import asyncio, random
 
         # ── 1. Fetch tracks from the selected playlist ──
         playlist_songs: list[str] = []
@@ -598,7 +623,18 @@ async def get_swipe_deck(
                 detail="Die Playlist hat zu wenige Songs. Wähle eine mit mindestens 3 Tracks!",
             )
 
-        # ── 2. Ask Gemini for 30 new recommendations based on the playlist ──
+        # ── 2. Load skip history from Redis ──
+        skip_history = _get_swipe_skips(current_user.id, playlist_id)
+        print(f"SWIPE: {len(skip_history)} previously skipped songs in history")
+
+        # Build the "avoid" list: playlist songs + skip history
+        avoid_songs = playlist_songs.copy()
+        if skip_history:
+            avoid_songs.extend(list(skip_history)[:50])
+
+        avoid_text = "\n".join(f"- {s}" for s in avoid_songs[:150])
+
+        # ── 3. Ask Gemini for 30 new recommendations ──
         songs_text = "\n".join(f"- {s}" for s in playlist_songs[:100])
 
         prompt = f"""Du bist ein Musik-Empfehlungs-Experte. Hier ist eine Spotify-Playlist:
@@ -609,7 +645,8 @@ Analysiere den Stil, die Genres und die Stimmung dieser Playlist.
 Empfehle genau 30 NEUE Songs, die perfekt dazu passen würden.
 
 Regeln:
-- KEINE Songs aus der obigen Liste empfehlen!
+- KEINE der folgenden Songs empfehlen (bereits in Playlist oder übersprungen):
+{avoid_text}
 - Mische bekannte und weniger bekannte Tracks
 - Achte auf Genre, Stimmung, Energie und Sprache der Playlist
 - Nur valides JSON, kein Markdown, keine Erklärung
@@ -664,22 +701,19 @@ Antworte NUR mit diesem JSON-Format:
                 detail="AI konnte keine Empfehlungen generieren. Versuche es nochmal!",
             )
 
-        # ── 3. Search Spotify for each Gemini song (sequential with delay) ──
+        # ── 4. Search Spotify for each song in parallel (like Discover) ──
         existing_lower = {s.lower() for s in playlist_songs}
-        tracks_with_preview: list[dict] = []
-        seen_ids: set[str] = set()
+        skip_lower = {s.lower() for s in skip_history}
 
-        for song in gemini_songs:
+        async def search_one(song: dict) -> dict | None:
             title = song.get("title", "")
             artist = song.get("artist", "")
             query = f"{title} {artist}"
 
-            # Skip if it's already in the playlist
+            # Skip if in playlist or skip history
             check = f"{title} - {artist}".lower()
-            if check in existing_lower:
-                continue
-
-            await asyncio.sleep(0.3)  # rate limit spacing
+            if check in existing_lower or check in skip_lower:
+                return None
 
             async with httpx.AsyncClient() as client:
                 s_resp = await client.get(
@@ -688,41 +722,46 @@ Antworte NUR mit diesem JSON-Format:
                     headers=headers,
                 )
             if s_resp.status_code != 200:
-                print(f"SWIPE: search failed for '{query}': {s_resp.status_code}")
-                continue
+                return None
 
             items = s_resp.json().get("tracks", {}).get("items", [])
             if not items:
-                continue
+                return None
 
             t = items[0]
-            tid = t["id"]
-            preview = t.get("preview_url")
-            if tid in seen_ids or not preview:
-                continue
-            seen_ids.add(tid)
-
             images = t.get("album", {}).get("images", [])
-            tracks_with_preview.append({
-                "id": tid,
+            return {
+                "id": t["id"],
                 "title": t["name"],
                 "artist": ", ".join(a["name"] for a in t.get("artists", [])),
                 "album": t.get("album", {}).get("name", ""),
                 "album_image": images[0]["url"] if images else None,
-                "preview_url": preview,
+                "preview_url": t.get("preview_url"),
                 "spotify_uri": t.get("uri", ""),
-            })
+            }
 
-        print(f"SWIPE: {len(tracks_with_preview)} songs with preview found")
+        results = await asyncio.gather(
+            *(search_one(song) for song in gemini_songs)
+        )
 
-        if not tracks_with_preview:
+        # Deduplicate by track ID
+        seen_ids: set[str] = set()
+        tracks: list[dict] = []
+        for r in results:
+            if r and r["id"] not in seen_ids:
+                seen_ids.add(r["id"])
+                tracks.append(r)
+
+        print(f"SWIPE: {len(tracks)} songs found on Spotify")
+
+        if not tracks:
             raise HTTPException(
                 status_code=404,
-                detail="Keine neuen Songs mit Preview gefunden. Versuche eine andere Playlist!",
+                detail="Keine neuen Songs gefunden. Versuche eine andere Playlist!",
             )
 
-        random.shuffle(tracks_with_preview)
-        return {"tracks": tracks_with_preview[:30]}
+        random.shuffle(tracks)
+        return {"tracks": tracks[:30]}
 
     except HTTPException:
         raise
@@ -762,6 +801,25 @@ async def save_to_playlist(
         )
 
     return {"saved": len(payload.track_ids), "already_saved": 0}
+
+
+# ── Swipe Deck: Report skipped tracks ──────────────────
+from pydantic import BaseModel as _BM
+
+
+class SwipeSkipRequest(_BM):
+    songs: list[str]  # "Title - Artist" strings
+
+
+@router.post("/discover/swipe/skip")
+async def report_swipe_skip(
+    payload: SwipeSkipRequest,
+    playlist_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    """Save skipped songs to Redis so they won't be recommended again."""
+    _save_swipe_skips(current_user.id, playlist_id, payload.songs)
+    return {"skipped": len(payload.songs)}
 
 
 # ── Vibe Roast ────────────────────────────────────────

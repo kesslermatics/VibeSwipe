@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion, useMotionValue, useTransform, animate, type PanInfo } from "framer-motion";
-import { getSwipeDeck, saveTrack, getUserPlaylists, type SwipeTrack } from "../lib/api";
+import { getSwipeDeck, saveTrack, skipSwipeTracks, getUserPlaylists, type SwipeTrack } from "../lib/api";
 
 interface Playlist {
     id: string;
@@ -68,9 +68,14 @@ export default function SwipeDeckPage({ onLogout: _onLogout }: { onLogout: () =>
         if (phase !== "swiping" || !currentTrack) return;
         const audio = audioRef.current;
         if (!audio) return;
-        audio.src = currentTrack.preview_url;
-        audio.load();
-        audio.play().catch(() => { /* autoplay blocked */ });
+        if (currentTrack.preview_url) {
+            audio.src = currentTrack.preview_url;
+            audio.load();
+            audio.play().catch(() => { /* autoplay blocked */ });
+        } else {
+            audio.pause();
+            audio.src = "";
+        }
         return () => {
             audio.pause();
         };
@@ -89,6 +94,9 @@ export default function SwipeDeckPage({ onLogout: _onLogout }: { onLogout: () =>
                 }
             } else {
                 setSkippedCount((c) => c + 1);
+                // Report skip to Redis (fire-and-forget)
+                const songKey = `${currentTrack.title} - ${currentTrack.artist}`;
+                skipSwipeTracks(selectedPlaylist.id, [songKey]).catch(() => { });
             }
 
             setSwipeLabel(null);
