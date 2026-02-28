@@ -49,15 +49,15 @@ export interface SwipeTrack {
   spotify_uri: string;
 }
 
-export async function getSwipeDeck(): Promise<SwipeTrack[]> {
+export async function getSwipeDeck(playlistId: string): Promise<SwipeTrack[]> {
   const token = localStorage.getItem("token") || "";
-  const res = await api<{ tracks: SwipeTrack[] }>("/discover/swipe", { token });
+  const res = await api<{ tracks: SwipeTrack[] }>(`/discover/swipe?playlist_id=${encodeURIComponent(playlistId)}`, { token });
   return res.tracks;
 }
 
-export async function saveTrack(trackId: string): Promise<void> {
+export async function saveTrack(trackId: string, playlistId: string): Promise<void> {
   const token = localStorage.getItem("token") || "";
-  await api("/library/save", {
+  await api(`/library/save?playlist_id=${encodeURIComponent(playlistId)}`, {
     method: "POST",
     body: { track_ids: [trackId] },
     token,

@@ -548,133 +548,160 @@ def gym_playlist_toggle_auto_refresh(
     }
 
 
-# ── Swipe Deck: Get recommendations with previews ────
+# ── Swipe Deck: Gemini-curated from a playlist ───────
 SPOTIFY_API_BASE = "https://api.spotify.com/v1"
+
+SWIPE_GEMINI_URL = (
+    f"https://generativelanguage.googleapis.com/v1beta/models/"
+    f"gemini-3-flash-preview:generateContent?key={settings.gemini_api_key}"
+)
 
 
 @router.get("/discover/swipe", response_model=SwipeDeckResponse)
 async def get_swipe_deck(
+    playlist_id: str,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Get 30 recommended tracks with preview URLs for swiping."""
+    """Analyse a playlist with Gemini, get 30 new song recommendations, search Spotify."""
     spotify_token = await get_valid_spotify_token(current_user, db)
     headers = {"Authorization": f"Bearer {spotify_token}"}
 
     try:
-        import asyncio, random
+        import asyncio, random, re as _re
 
-        # ── 0. Fetch user's saved/liked track IDs to exclude ──
-        saved_ids: set[str] = set()
-        try:
-            offset = 0
-            while offset < 500:  # Cap at 500 to avoid slow requests
-                async with httpx.AsyncClient() as client:
-                    saved_resp = await client.get(
-                        f"{SPOTIFY_API_BASE}/me/tracks",
-                        params={"limit": 50, "offset": offset},
-                        headers=headers,
-                    )
-                if saved_resp.status_code != 200:
-                    print(f"SWIPE: Saved tracks fetch failed: {saved_resp.status_code}")
-                    break
-                items = saved_resp.json().get("items", [])
-                if not items:
-                    break
-                for item in items:
-                    track = item.get("track")
-                    if track:
-                        saved_ids.add(track["id"])
-                offset += 50
-            print(f"SWIPE: Loaded {len(saved_ids)} saved track IDs to exclude")
-        except Exception as e:
-            print(f"SWIPE: Could not load saved tracks: {e}")
+        # ── 1. Fetch tracks from the selected playlist ──
+        playlist_songs: list[str] = []
+        url = f"{SPOTIFY_API_BASE}/playlists/{playlist_id}/items"
+        params: dict = {"limit": 50}
 
-        # ── 1. Get user's top artists (try short → medium → long) ──
-        top_artists: list[dict] = []
-        for time_range in ["short_term", "medium_term", "long_term"]:
-            async with httpx.AsyncClient() as client:
-                top_resp = await client.get(
-                    f"{SPOTIFY_API_BASE}/me/top/artists",
-                    params={"limit": 20, "time_range": time_range},
-                    headers=headers,
-                )
-            if top_resp.status_code == 200:
-                top_artists = top_resp.json().get("items", [])
-                if top_artists:
-                    print(f"SWIPE: Got {len(top_artists)} top artists from {time_range}")
+        async with httpx.AsyncClient() as client:
+            while url and len(playlist_songs) < 200:
+                resp = await client.get(url, params=params, headers=headers)
+                if resp.status_code != 200:
+                    print(f"SWIPE: playlist items failed: {resp.status_code}")
                     break
-            else:
-                print(f"SWIPE: top/artists {time_range} failed: {top_resp.status_code}")
+                data = resp.json()
+                for item in data.get("items", []):
+                    track = item.get("track") or item.get("item")
+                    if track and track.get("name"):
+                        artists = ", ".join(a["name"] for a in track.get("artists", []))
+                        playlist_songs.append(f"{track['name']} - {artists}")
+                url = data.get("next")
+                params = {}
 
-        if not top_artists:
+        print(f"SWIPE: Got {len(playlist_songs)} songs from playlist {playlist_id}")
+
+        if len(playlist_songs) < 3:
             raise HTTPException(
                 status_code=400,
-                detail="Keine Top-Artists gefunden. Hör mehr Musik und versuch es später!",
+                detail="Die Playlist hat zu wenige Songs. Wähle eine mit mindestens 3 Tracks!",
             )
 
-        # ── 2. Try related-artists first, fall back to top artists directly ──
-        artist_ids_for_tracks: list[str] = []
-        top_artist_ids = {a["id"] for a in top_artists}
+        # ── 2. Ask Gemini for 30 new recommendations based on the playlist ──
+        songs_text = "\n".join(f"- {s}" for s in playlist_songs[:100])
 
-        # Try related artists for discovery
-        for artist in top_artists[:5]:
-            await asyncio.sleep(0.15)
-            async with httpx.AsyncClient() as client:
-                rel_resp = await client.get(
-                    f"{SPOTIFY_API_BASE}/artists/{artist['id']}/related-artists",
-                    headers=headers,
-                )
-            if rel_resp.status_code == 200:
-                for ra in rel_resp.json().get("artists", []):
-                    if ra["id"] not in top_artist_ids:
-                        artist_ids_for_tracks.append(ra["id"])
-            elif rel_resp.status_code == 403:
-                print("SWIPE: related-artists returned 403 (dev-mode). Using top artists directly.")
-                break
+        prompt = f"""Du bist ein Musik-Empfehlungs-Experte. Hier ist eine Spotify-Playlist:
 
-        # Deduplicate
-        artist_ids_for_tracks = list(dict.fromkeys(artist_ids_for_tracks))
+{songs_text}
 
-        # If related-artists gave nothing, use the user's own top artists
-        if not artist_ids_for_tracks:
-            print("SWIPE: No related artists found. Falling back to user's top artists.")
-            artist_ids_for_tracks = [a["id"] for a in top_artists]
+Analysiere den Stil, die Genres und die Stimmung dieser Playlist.
+Empfehle genau 30 NEUE Songs, die perfekt dazu passen würden.
 
-        print(f"SWIPE: Using {len(artist_ids_for_tracks)} artists for track discovery")
+Regeln:
+- KEINE Songs aus der obigen Liste empfehlen!
+- Mische bekannte und weniger bekannte Tracks
+- Achte auf Genre, Stimmung, Energie und Sprache der Playlist
+- Nur valides JSON, kein Markdown, keine Erklärung
 
-        # ── 3. Get top tracks from a random sample of those artists ──
-        sampled = random.sample(
-            artist_ids_for_tracks, min(10, len(artist_ids_for_tracks))
-        )
-        all_tracks: list[dict] = []
+Antworte NUR mit diesem JSON-Format:
+{{
+  "songs": [
+    {{"title": "Song Name", "artist": "Artist Name"}},
+    ...
+  ]
+}}"""
 
-        for artist_id in sampled:
-            await asyncio.sleep(0.15)
-            async with httpx.AsyncClient() as client:
-                tt_resp = await client.get(
-                    f"{SPOTIFY_API_BASE}/artists/{artist_id}/top-tracks",
-                    params={"market": "DE"},
-                    headers=headers,
-                )
-            if tt_resp.status_code == 200:
-                all_tracks.extend(tt_resp.json().get("tracks", []))
-            else:
-                print(f"SWIPE: top-tracks for {artist_id} failed: {tt_resp.status_code}")
+        gemini_payload = {
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {
+                "temperature": 1.5,
+                "maxOutputTokens": 4096,
+                "responseMimeType": "application/json",
+            },
+        }
 
-        print(f"SWIPE: Collected {len(all_tracks)} total tracks from artists")
+        gemini_songs: list[dict] = []
+        for attempt in range(3):
+            if attempt > 0:
+                await asyncio.sleep(1)
+            async with httpx.AsyncClient(timeout=60) as client:
+                g_resp = await client.post(SWIPE_GEMINI_URL, json=gemini_payload)
+            if g_resp.status_code != 200:
+                print(f"SWIPE: Gemini attempt {attempt+1} failed: {g_resp.status_code}")
+                continue
+            try:
+                g_data = g_resp.json()
+                g_text = g_data["candidates"][0]["content"]["parts"][0]["text"].strip()
+                if g_text.startswith("```"):
+                    g_text = g_text.split("\n", 1)[1]
+                    if g_text.endswith("```"):
+                        g_text = g_text[:-3]
+                    g_text = g_text.strip()
+                parsed = json.loads(g_text)
+                gemini_songs = parsed.get("songs", [])
+                if gemini_songs:
+                    break
+            except Exception as e:
+                print(f"SWIPE: Gemini parse attempt {attempt+1} failed: {e}")
+                continue
 
-        # ── 4. Deduplicate, exclude saved songs, filter for preview_url ──
-        seen_ids: set[str] = set()
+        print(f"SWIPE: Gemini recommended {len(gemini_songs)} songs")
+
+        if not gemini_songs:
+            raise HTTPException(
+                status_code=500,
+                detail="AI konnte keine Empfehlungen generieren. Versuche es nochmal!",
+            )
+
+        # ── 3. Search Spotify for each Gemini song (sequential with delay) ──
+        existing_lower = {s.lower() for s in playlist_songs}
         tracks_with_preview: list[dict] = []
-        random.shuffle(all_tracks)
+        seen_ids: set[str] = set()
 
-        for t in all_tracks:
+        for song in gemini_songs:
+            title = song.get("title", "")
+            artist = song.get("artist", "")
+            query = f"{title} {artist}"
+
+            # Skip if it's already in the playlist
+            check = f"{title} - {artist}".lower()
+            if check in existing_lower:
+                continue
+
+            await asyncio.sleep(0.3)  # rate limit spacing
+
+            async with httpx.AsyncClient() as client:
+                s_resp = await client.get(
+                    f"{SPOTIFY_API_BASE}/search",
+                    params={"q": query, "type": "track", "limit": 1, "market": "DE"},
+                    headers=headers,
+                )
+            if s_resp.status_code != 200:
+                print(f"SWIPE: search failed for '{query}': {s_resp.status_code}")
+                continue
+
+            items = s_resp.json().get("tracks", {}).get("items", [])
+            if not items:
+                continue
+
+            t = items[0]
             tid = t["id"]
             preview = t.get("preview_url")
-            if tid in seen_ids or tid in saved_ids or not preview:
+            if tid in seen_ids or not preview:
                 continue
             seen_ids.add(tid)
+
             images = t.get("album", {}).get("images", [])
             tracks_with_preview.append({
                 "id": tid,
@@ -686,17 +713,15 @@ async def get_swipe_deck(
                 "spotify_uri": t.get("uri", ""),
             })
 
-        print(
-            f"SWIPE: {len(tracks_with_preview)} tracks with preview "
-            f"(filtered {len(saved_ids)} saved, {len(all_tracks)} total)"
-        )
+        print(f"SWIPE: {len(tracks_with_preview)} songs with preview found")
 
         if not tracks_with_preview:
             raise HTTPException(
                 status_code=404,
-                detail="Keine neuen Songs mit Preview gefunden. Versuche es später nochmal!",
+                detail="Keine neuen Songs mit Preview gefunden. Versuche eine andere Playlist!",
             )
 
+        random.shuffle(tracks_with_preview)
         return {"tracks": tracks_with_preview[:30]}
 
     except HTTPException:
@@ -709,28 +734,31 @@ async def get_swipe_deck(
         )
 
 
-# ── Swipe Deck: Save track to Liked Songs ─────────────
+# ── Swipe Deck: Save track to a playlist ──────────────
 @router.post("/library/save")
-async def save_to_library(
+async def save_to_playlist(
     payload: SaveTracksRequest,
+    playlist_id: str,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Save tracks to the user's Liked Songs on Spotify."""
+    """Add tracks to a specific Spotify playlist."""
     spotify_token = await get_valid_spotify_token(current_user, db)
 
+    uris = [f"spotify:track:{tid}" for tid in payload.track_ids]
+
     async with httpx.AsyncClient() as client:
-        resp = await client.put(
-            f"{SPOTIFY_API_BASE}/me/tracks",
+        resp = await client.post(
+            f"{SPOTIFY_API_BASE}/playlists/{playlist_id}/items",
             headers={"Authorization": f"Bearer {spotify_token}"},
-            json={"ids": payload.track_ids},
+            json={"uris": uris},
         )
 
     if resp.status_code not in (200, 201):
-        logger.error(f"Save to library failed: {resp.status_code} {resp.text[:300]}")
+        logger.error(f"Save to playlist failed: {resp.status_code} {resp.text[:300]}")
         raise HTTPException(
             status_code=resp.status_code,
-            detail=f"Song konnte nicht gespeichert werden: {resp.text[:200]}",
+            detail=f"Song konnte nicht zur Playlist hinzugefügt werden: {resp.text[:200]}",
         )
 
     return {"saved": len(payload.track_ids), "already_saved": 0}

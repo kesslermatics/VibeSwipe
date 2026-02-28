@@ -1,17 +1,27 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion, useMotionValue, useTransform, animate, type PanInfo } from "framer-motion";
-import { getSwipeDeck, saveTrack, type SwipeTrack } from "../lib/api";
+import { getSwipeDeck, saveTrack, getUserPlaylists, type SwipeTrack } from "../lib/api";
 
-type Phase = "intro" | "swiping" | "empty";
+interface Playlist {
+    id: string;
+    name: string;
+    image: string | null;
+    total_tracks: number;
+    owner: string;
+}
+
+type Phase = "pick-playlist" | "loading" | "swiping" | "empty";
 
 export default function SwipeDeckPage({ onLogout: _onLogout }: { onLogout: () => void }) {
     const navigate = useNavigate();
 
-    const [phase, setPhase] = useState<Phase>("intro");
+    const [phase, setPhase] = useState<Phase>("pick-playlist");
+    const [playlists, setPlaylists] = useState<Playlist[]>([]);
+    const [playlistsLoading, setPlaylistsLoading] = useState(true);
+    const [selectedPlaylist, setSelectedPlaylist] = useState<Playlist | null>(null);
     const [deck, setDeck] = useState<SwipeTrack[]>([]);
     const [currentIndex, setCurrentIndex] = useState(0);
-    const [loading, setLoading] = useState(false);
     const [error, setError] = useState("");
     const [swipeLabel, setSwipeLabel] = useState<"like" | "nope" | null>(null);
     const [savedCount, setSavedCount] = useState(0);
@@ -19,27 +29,39 @@ export default function SwipeDeckPage({ onLogout: _onLogout }: { onLogout: () =>
 
     const audioRef = useRef<HTMLAudioElement | null>(null);
 
-    // Load deck
-    const loadDeck = useCallback(async () => {
-        setLoading(true);
-        setError("");
-        try {
-            const tracks = await getSwipeDeck();
-            if (tracks.length === 0) {
-                setError("Keine Song-Vorschläge mit Preview verfügbar. Versuche es später nochmal!");
-                return;
-            }
-            setDeck(tracks);
-            setCurrentIndex(0);
-        } catch (err) {
-            setError(err instanceof Error ? err.message : "Fehler beim Laden");
-        } finally {
-            setLoading(false);
-        }
+    // Load user playlists on mount
+    useEffect(() => {
+        getUserPlaylists()
+            .then((p) => setPlaylists(p as Playlist[]))
+            .catch((err) => setError(err instanceof Error ? err.message : "Playlists laden fehlgeschlagen"))
+            .finally(() => setPlaylistsLoading(false));
     }, []);
 
     const currentTrack = deck[currentIndex] ?? null;
     const nextTrack = deck[currentIndex + 1] ?? null;
+
+    // Load deck from selected playlist
+    const loadDeck = useCallback(async (playlist: Playlist) => {
+        setPhase("loading");
+        setError("");
+        setSelectedPlaylist(playlist);
+        setSavedCount(0);
+        setSkippedCount(0);
+        try {
+            const tracks = await getSwipeDeck(playlist.id);
+            if (tracks.length === 0) {
+                setError("Keine passenden Songs mit Preview gefunden. Versuch eine andere Playlist!");
+                setPhase("pick-playlist");
+                return;
+            }
+            setDeck(tracks);
+            setCurrentIndex(0);
+            setPhase("swiping");
+        } catch (err) {
+            setError(err instanceof Error ? err.message : "Fehler beim Laden");
+            setPhase("pick-playlist");
+        }
+    }, []);
 
     // Play audio when current track changes
     useEffect(() => {
@@ -54,19 +76,13 @@ export default function SwipeDeckPage({ onLogout: _onLogout }: { onLogout: () =>
         };
     }, [currentIndex, phase, currentTrack]);
 
-    const handleStart = async () => {
-        await loadDeck();
-        setPhase("swiping");
-    };
-
     const advanceCard = useCallback(
         async (direction: "left" | "right") => {
-            if (!currentTrack) return;
+            if (!currentTrack || !selectedPlaylist) return;
 
             if (direction === "right") {
-                // Save to liked songs
                 try {
-                    await saveTrack(currentTrack.id);
+                    await saveTrack(currentTrack.id, selectedPlaylist.id);
                     setSavedCount((c) => c + 1);
                 } catch {
                     /* silent fail */
@@ -78,21 +94,13 @@ export default function SwipeDeckPage({ onLogout: _onLogout }: { onLogout: () =>
             setSwipeLabel(null);
 
             if (currentIndex + 1 >= deck.length) {
-                // Deck exhausted — load more
                 setPhase("empty");
             } else {
                 setCurrentIndex((i) => i + 1);
             }
         },
-        [currentTrack, currentIndex, deck.length]
+        [currentTrack, currentIndex, deck.length, selectedPlaylist]
     );
-
-    const handleReload = async () => {
-        setSavedCount(0);
-        setSkippedCount(0);
-        await loadDeck();
-        setPhase("swiping");
-    };
 
     return (
         <div className="min-h-screen px-4 py-8">
@@ -100,7 +108,7 @@ export default function SwipeDeckPage({ onLogout: _onLogout }: { onLogout: () =>
                 {/* Header */}
                 <div className="mb-6 flex items-center gap-4">
                     <button
-                        onClick={() => navigate("/")}
+                        onClick={() => phase === "swiping" ? setPhase("pick-playlist") : navigate("/")}
                         className="rounded-lg p-2 text-gray-400 ring-1 ring-white/10 transition hover:text-white hover:ring-white/20"
                     >
                         <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -113,7 +121,12 @@ export default function SwipeDeckPage({ onLogout: _onLogout }: { onLogout: () =>
                             <span className="text-gray-100">Deck</span>
                         </h1>
                         <p className="text-sm text-gray-400">
-                            Swipe rechts zum Speichern, links zum Skippen
+                            {phase === "pick-playlist"
+                                ? "Wähle eine Playlist als Basis"
+                                : selectedPlaylist
+                                    ? `Basierend auf: ${selectedPlaylist.name}`
+                                    : "Swipe rechts zum Hinzufügen"
+                            }
                         </p>
                     </div>
                     {phase === "swiping" && (
@@ -133,41 +146,63 @@ export default function SwipeDeckPage({ onLogout: _onLogout }: { onLogout: () =>
                 {/* Hidden audio element */}
                 <audio ref={audioRef} />
 
-                {/* ── INTRO ── */}
-                {phase === "intro" && (
-                    <div className="flex flex-col items-center py-16">
-                        <div className="mb-6 text-7xl">💿</div>
-                        <h2 className="mb-3 text-xl font-bold text-gray-100">
-                            Bereit zum Swipen?
-                        </h2>
-                        <p className="mb-8 max-w-xs text-center text-sm text-gray-400">
-                            Spotify schlägt dir Songs vor, basierend auf deinen Hörgewohnheiten.
-                            Swipe rechts zum Speichern in deinen Lieblingssongs!
-                        </p>
-                        <div className="mb-6 flex gap-8 text-center text-sm text-gray-500">
-                            <div>
-                                <div className="mb-1 text-2xl">👈</div>
-                                <p>Skip</p>
-                            </div>
-                            <div>
-                                <div className="mb-1 text-2xl">👉</div>
-                                <p>Speichern</p>
-                            </div>
+                {/* ── PICK PLAYLIST ── */}
+                {phase === "pick-playlist" && (
+                    <div>
+                        <div className="mb-4 flex items-center gap-2">
+                            <span className="text-2xl">💿</span>
+                            <p className="text-sm text-gray-400">
+                                AI analysiert die Playlist und schlägt passende neue Songs vor.
+                                Rechts-Swipe fügt Songs direkt zur Playlist hinzu!
+                            </p>
                         </div>
-                        <button
-                            onClick={handleStart}
-                            disabled={loading}
-                            className="rounded-2xl bg-gradient-to-r from-purple-500 to-violet-500 px-8 py-4 text-base font-bold text-white shadow-lg shadow-purple-500/25 transition hover:brightness-110 disabled:opacity-50"
-                        >
-                            {loading ? (
-                                <span className="flex items-center gap-2">
-                                    <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                                    Lade Songs...
-                                </span>
-                            ) : (
-                                "🎵 Start Swiping"
-                            )}
-                        </button>
+
+                        {playlistsLoading ? (
+                            <div className="flex flex-col items-center py-16">
+                                <div className="h-8 w-8 animate-spin rounded-full border-2 border-purple-500 border-t-transparent" />
+                                <p className="mt-3 text-sm text-gray-500">Lade Playlists...</p>
+                            </div>
+                        ) : playlists.length === 0 ? (
+                            <p className="py-8 text-center text-sm text-gray-500">
+                                Keine Playlists gefunden. Erstelle zuerst eine Playlist auf Spotify!
+                            </p>
+                        ) : (
+                            <div className="space-y-2">
+                                {playlists.map((pl) => (
+                                    <button
+                                        key={pl.id}
+                                        onClick={() => loadDeck(pl)}
+                                        className="flex w-full items-center gap-4 rounded-2xl bg-white/5 p-3 text-left ring-1 ring-white/5 transition hover:bg-white/10 hover:ring-purple-500/30"
+                                    >
+                                        <div className="h-14 w-14 flex-shrink-0 overflow-hidden rounded-xl bg-gray-800">
+                                            {pl.image ? (
+                                                <img src={pl.image} alt="" className="h-full w-full object-cover" />
+                                            ) : (
+                                                <div className="flex h-full w-full items-center justify-center text-xl text-gray-600">🎵</div>
+                                            )}
+                                        </div>
+                                        <div className="min-w-0 flex-1">
+                                            <p className="truncate text-sm font-semibold text-gray-200">{pl.name}</p>
+                                            <p className="text-xs text-gray-500">{pl.total_tracks} Songs · {pl.owner}</p>
+                                        </div>
+                                        <svg className="h-4 w-4 flex-shrink-0 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                                        </svg>
+                                    </button>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                )}
+
+                {/* ── LOADING ── */}
+                {phase === "loading" && (
+                    <div className="flex flex-col items-center py-16">
+                        <div className="mb-4 h-12 w-12 animate-spin rounded-full border-4 border-purple-500 border-t-transparent" />
+                        <p className="text-sm text-gray-400">AI analysiert die Playlist...</p>
+                        <p className="mt-1 text-xs text-gray-600">
+                            Das kann 15–30 Sekunden dauern
+                        </p>
                     </div>
                 )}
 
@@ -181,11 +216,7 @@ export default function SwipeDeckPage({ onLogout: _onLogout }: { onLogout: () =>
                                 <div className="absolute inset-0 z-0 scale-[0.95] rounded-3xl bg-white/5 ring-1 ring-white/10 overflow-hidden opacity-60">
                                     <div className="h-[340px] bg-gray-800">
                                         {nextTrack.album_image && (
-                                            <img
-                                                src={nextTrack.album_image}
-                                                alt=""
-                                                className="h-full w-full object-cover opacity-50"
-                                            />
+                                            <img src={nextTrack.album_image} alt="" className="h-full w-full object-cover opacity-50" />
                                         )}
                                     </div>
                                 </div>
@@ -248,23 +279,35 @@ export default function SwipeDeckPage({ onLogout: _onLogout }: { onLogout: () =>
                         <h2 className="mb-2 text-xl font-bold text-gray-100">
                             Alle Songs durchgeswipt!
                         </h2>
+                        {selectedPlaylist && (
+                            <p className="mb-4 text-sm text-gray-400">
+                                {savedCount} Songs zu <span className="font-semibold text-purple-400">{selectedPlaylist.name}</span> hinzugefügt
+                            </p>
+                        )}
                         <div className="mb-6 flex gap-6 text-center">
                             <div className="rounded-xl bg-green-500/10 px-5 py-3 ring-1 ring-green-500/20">
                                 <p className="text-2xl font-bold text-green-400">{savedCount}</p>
-                                <p className="text-[10px] text-gray-400">Gespeichert</p>
+                                <p className="text-[10px] text-gray-400">Hinzugefügt</p>
                             </div>
                             <div className="rounded-xl bg-red-500/10 px-5 py-3 ring-1 ring-red-500/20">
                                 <p className="text-2xl font-bold text-red-400">{skippedCount}</p>
                                 <p className="text-[10px] text-gray-400">Geskippt</p>
                             </div>
                         </div>
-                        <button
-                            onClick={handleReload}
-                            disabled={loading}
-                            className="rounded-2xl bg-gradient-to-r from-purple-500 to-violet-500 px-8 py-4 text-base font-bold text-white shadow-lg shadow-purple-500/25 transition hover:brightness-110 disabled:opacity-50"
-                        >
-                            {loading ? "Lade..." : "🔄 Neue Songs laden"}
-                        </button>
+                        <div className="flex gap-3">
+                            <button
+                                onClick={() => selectedPlaylist && loadDeck(selectedPlaylist)}
+                                className="rounded-2xl bg-gradient-to-r from-purple-500 to-violet-500 px-6 py-3 text-sm font-bold text-white shadow-lg shadow-purple-500/25 transition hover:brightness-110"
+                            >
+                                🔄 Nochmal
+                            </button>
+                            <button
+                                onClick={() => { setPhase("pick-playlist"); setError(""); }}
+                                className="rounded-2xl px-6 py-3 text-sm font-bold text-gray-300 ring-1 ring-white/10 transition hover:ring-white/20"
+                            >
+                                Andere Playlist
+                            </button>
+                        </div>
                     </div>
                 )}
             </div>
