@@ -41,8 +41,45 @@ GEMINI_URL = (
 redis_client = redis.Redis.from_url(settings.redis_url, decode_responses=True)
 
 
+HISTORY_TTL = 2 * 24 * 60 * 60  # 2 days in seconds
+
+
 def song_cache_key(title: str, artist: str) -> str:
     return f"song_uri::{title.lower().strip()}|||{artist.lower().strip()}"
+
+
+def gym_history_key(user_id: int) -> str:
+    return f"gym_history::{user_id}"
+
+
+def save_gym_history(user_id: int, songs: list[dict]) -> None:
+    """Save generated songs to Redis so they can be avoided next time.
+    Songs expire after 2 days automatically via TTL."""
+    key = gym_history_key(user_id)
+    try:
+        entries = [f"{s['title']} - {s['artist']}" for s in songs]
+        # Append to existing history (don't overwrite)
+        existing = redis_client.lrange(key, 0, -1)
+        for entry in entries:
+            if entry not in existing:
+                redis_client.rpush(key, entry)
+        # Reset TTL to 2 days from now
+        redis_client.expire(key, HISTORY_TTL)
+        logger.info(f"Gym History: Saved {len(entries)} songs for user {user_id} (total: {redis_client.llen(key)})")
+    except Exception as e:
+        logger.warning(f"Gym History: Could not save history: {e}")
+
+
+def get_gym_history(user_id: int) -> list[str]:
+    """Get recently used gym songs from Redis (last 2 days)."""
+    key = gym_history_key(user_id)
+    try:
+        history = redis_client.lrange(key, 0, -1)
+        logger.info(f"Gym History: Found {len(history)} recent songs for user {user_id}")
+        return history
+    except Exception as e:
+        logger.warning(f"Gym History: Could not read history: {e}")
+        return []
 
 
 # ── Spotify helpers ───────────────────────────────────
@@ -239,9 +276,17 @@ async def robust_add_items(
 # ── Gemini ────────────────────────────────────────────
 
 
-async def ask_gemini_gym(inspiration_songs: list[str]) -> dict:
-    """Ask Gemini for a gym playlist based on inspiration songs."""
+async def ask_gemini_gym(inspiration_songs: list[str], recent_history: list[str] | None = None) -> dict:
+    """Ask Gemini for a gym playlist based on inspiration songs.
+    If recent_history is provided, Gemini will avoid those songs."""
     song_list = "\n".join(f"- {s}" for s in inspiration_songs)
+
+    avoid_block = ""
+    if recent_history:
+        avoid_list = "\n".join(f"- {s}" for s in recent_history)
+        avoid_block = f"""\n\nIMPORTANT: The following songs were already used in recent gym playlists (last 2 days).
+DO NOT include ANY of these songs. Pick DIFFERENT songs instead:
+{avoid_list}\n"""
 
     prompt = f"""You are a music expert specializing in gym and workout playlists.
 
@@ -255,7 +300,7 @@ Your task: Create a killer gym/workout playlist with exactly 30 songs that:
 - Include songs that build energy and keep the momentum going
 
 DO NOT include any of the inspiration songs in your recommendations.
-
+{avoid_block}
 Respond ONLY with valid JSON in this exact format:
 {{
   "songs": [
@@ -363,9 +408,12 @@ async def generate_gym_playlist(
     inspiration = [f"{t['title']} - {t['artist']}" for t in sampled]
     logger.info(f"Gym Playlist: Using {len(inspiration)} inspiration songs")
 
-    # 3. Ask Gemini
+    # 3. Load recent song history & ask Gemini
+    recent_history = get_gym_history(current_user.id)
+    logger.info(f"Gym Playlist: {len(recent_history)} songs in 2-day history to avoid")
+
     logger.info("Gym Playlist: Asking Gemini for recommendations...")
-    gemini_result = await ask_gemini_gym(inspiration)
+    gemini_result = await ask_gemini_gym(inspiration, recent_history if recent_history else None)
     gemini_songs = gemini_result.get("songs", [])
     logger.info(f"Gym Playlist: Gemini returned {len(gemini_songs)} songs")
 
@@ -381,6 +429,9 @@ async def generate_gym_playlist(
         await asyncio.sleep(1.0)
 
     logger.info(f"Gym Playlist: Found {len(uris)} tracks on Spotify")
+
+    # 4b. Save generated songs to history (2-day TTL)
+    save_gym_history(current_user.id, gemini_songs)
 
     if len(uris) < 10:
         raise Exception(
