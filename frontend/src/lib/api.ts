@@ -37,3 +37,54 @@ export async function getUserPlaylists() {
   const res = await api<{ playlists: any[] }>("/my-playlists", { token });
   return res.playlists;
 }
+
+// ── Swipe Deck ──────────────────────────────────────
+export interface SwipeTrack {
+  id: string;
+  title: string;
+  artist: string;
+  album: string;
+  album_image: string | null;
+  preview_url: string;
+  spotify_uri: string;
+}
+
+export async function getSwipeDeck(): Promise<SwipeTrack[]> {
+  const token = localStorage.getItem("token") || "";
+  const res = await api<{ tracks: SwipeTrack[] }>("/discover/swipe", { token });
+  return res.tracks;
+}
+
+export async function saveTrack(trackId: string): Promise<void> {
+  const token = localStorage.getItem("token") || "";
+  await api("/library/save", {
+    method: "POST",
+    body: { track_ids: [trackId] },
+    token,
+  });
+}
+
+// ── Vibe Roast ──────────────────────────────────────
+export interface AudioFeatures {
+  danceability: number;
+  energy: number;
+  valence: number;
+  acousticness: number;
+  instrumentalness: number;
+  speechiness: number;
+  tempo: number;
+}
+
+export interface RoastResult {
+  persona: string;
+  roast: string;
+  audio_features: AudioFeatures;
+  top_genres: string[];
+  top_artists: string[];
+  track_count: number;
+}
+
+export async function getRoast(): Promise<RoastResult> {
+  const token = localStorage.getItem("token") || "";
+  return api<RoastResult>("/vibe-roast", { token });
+}

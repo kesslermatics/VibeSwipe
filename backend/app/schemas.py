@@ -105,3 +105,38 @@ class GymPlaylistSettingsResponse(BaseModel):
 
 class GymPlaylistAutoRefreshRequest(BaseModel):
     auto_refresh: bool
+
+
+# ── Swipe Deck ────────────────────────────────────────
+class SwipeTrack(BaseModel):
+    id: str
+    title: str
+    artist: str
+    album: str
+    album_image: str | None = None
+    preview_url: str
+    spotify_uri: str
+
+
+class SwipeDeckResponse(BaseModel):
+    tracks: list[SwipeTrack]
+
+
+# ── Vibe Roast ────────────────────────────────────────
+class AudioFeatures(BaseModel):
+    danceability: float
+    energy: float
+    valence: float
+    acousticness: float
+    instrumentalness: float
+    speechiness: float
+    tempo: float
+
+
+class RoastResponse(BaseModel):
+    persona: str
+    roast: str
+    audio_features: AudioFeatures
+    top_genres: list[str]
+    top_artists: list[str]
+    track_count: int

@@ -37,10 +37,18 @@ const tiles: Tile[] = [
     {
         id: "swipe",
         emoji: "💿",
-        title: "Swipe",
-        description: "Swipe durch Song-Vorschläge — links oder rechts",
+        title: "Swipe Deck",
+        description: "Swipe durch Song-Vorschläge — rechts speichern, links skippen",
         color: "from-purple-500/20 to-violet-500/10 hover:ring-purple-500/40",
-        route: "/",
+        route: "/swipe-deck",
+    },
+    {
+        id: "vibe-roast",
+        emoji: "🔥",
+        title: "Vibe Roast",
+        description: "AI analysiert deinen Musikgeschmack und roastet dich gnadenlos",
+        color: "from-orange-500/20 to-red-500/10 hover:ring-orange-500/40",
+        route: "/vibe-roast",
     },
     {
         id: "playlists",
@@ -109,7 +117,7 @@ export default function HomePage({ onLogout }: { onLogout: () => void }) {
                 <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                     {tiles.map((tile) => {
                         // Gym Playlist ist jetzt verfügbar
-                        const isAvailable = tile.id === "discover" || tile.id === "daily-drive" || tile.id === "gym-playlist";
+                        const isAvailable = tile.id === "discover" || tile.id === "daily-drive" || tile.id === "gym-playlist" || tile.id === "swipe" || tile.id === "vibe-roast";
                         return (
                             <button
                                 key={tile.id}

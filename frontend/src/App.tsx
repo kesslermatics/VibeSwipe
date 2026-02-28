@@ -6,6 +6,8 @@ import HomePage from "./pages/HomePage";
 import DiscoverPage from "./pages/DiscoverPage";
 import DailyDrivePage from "./pages/DailyDrivePage";
 import GymPlaylistPage from "./pages/GymPlaylistPage";
+import SwipeDeckPage from "./pages/SwipeDeckPage";
+import RoastPage from "./pages/RoastPage";
 
 function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(!!localStorage.getItem("token"));
@@ -33,6 +35,8 @@ function App() {
         <Route path="/discover" element={isLoggedIn ? <DiscoverPage onLogout={logout} /> : <Navigate to="/login" replace />} />
         <Route path="/daily-drive" element={isLoggedIn ? <DailyDrivePage onLogout={logout} /> : <Navigate to="/login" replace />} />
         <Route path="/gym-playlist" element={isLoggedIn ? <GymPlaylistPage onLogout={logout} /> : <Navigate to="/login" replace />} />
+        <Route path="/swipe-deck" element={isLoggedIn ? <SwipeDeckPage onLogout={logout} /> : <Navigate to="/login" replace />} />
+        <Route path="/vibe-roast" element={isLoggedIn ? <RoastPage onLogout={logout} /> : <Navigate to="/login" replace />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </div>

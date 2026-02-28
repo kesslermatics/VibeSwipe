@@ -10,11 +10,12 @@ logger = logging.getLogger(__name__)
 from app.config import get_settings
 from app.database import get_db
 from app.models import User
-from app.schemas import SpotifyCallback, Token, UserResponse, MessageResponse, DiscoverRequest, DiscoverResponse, CreatePlaylistRequest, CreatePlaylistResponse, SaveTracksRequest, SaveTracksResponse, DailyDriveRequest, DailyDriveResponse, GymPlaylistGenerateRequest, GymPlaylistGenerateResponse, GymPlaylistSettingsResponse, GymPlaylistAutoRefreshRequest
+from app.schemas import SpotifyCallback, Token, UserResponse, MessageResponse, DiscoverRequest, DiscoverResponse, CreatePlaylistRequest, CreatePlaylistResponse, SaveTracksRequest, SaveTracksResponse, DailyDriveRequest, DailyDriveResponse, GymPlaylistGenerateRequest, GymPlaylistGenerateResponse, GymPlaylistSettingsResponse, GymPlaylistAutoRefreshRequest, SwipeDeckResponse, RoastResponse
 from app.auth import create_access_token, get_current_user, get_valid_spotify_token, refresh_spotify_token
 from app.discover import discover_songs
 from app.daily_drive import fetch_saved_shows, generate_daily_drive
 from app.gym_playlist import generate_gym_playlist
+from app.roast import generate_vibe_roast
 from app.models import GymPlaylistSettings
 import json
 
@@ -545,6 +546,134 @@ def gym_playlist_toggle_auto_refresh(
         "auto_refresh": gym_settings.auto_refresh,
         "message": "Auto-Refresh aktiviert" if payload.auto_refresh else "Auto-Refresh deaktiviert",
     }
+
+
+# ── Swipe Deck: Get recommendations with previews ────
+SPOTIFY_API_BASE = "https://api.spotify.com/v1"
+
+
+@router.get("/discover/swipe", response_model=SwipeDeckResponse)
+async def get_swipe_deck(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Get 30 recommended tracks with preview URLs for swiping."""
+    spotify_token = await get_valid_spotify_token(current_user, db)
+    headers = {"Authorization": f"Bearer {spotify_token}"}
+
+    try:
+        # 1. Get user's top tracks as seeds (short_term for current taste)
+        async with httpx.AsyncClient() as client:
+            top_resp = await client.get(
+                f"{SPOTIFY_API_BASE}/me/top/tracks",
+                params={"limit": 5, "time_range": "short_term"},
+                headers=headers,
+            )
+        if top_resp.status_code != 200:
+            raise HTTPException(status_code=top_resp.status_code, detail="Konnte Top-Tracks nicht laden")
+
+        top_items = top_resp.json().get("items", [])
+        if len(top_items) < 1:
+            raise HTTPException(
+                status_code=400,
+                detail="Du brauchst mindestens ein paar gehörte Songs für Swipe-Empfehlungen!",
+            )
+
+        seed_track_ids = [t["id"] for t in top_items[:5]]
+
+        # 2. Get recommendations from Spotify
+        async with httpx.AsyncClient() as client:
+            rec_resp = await client.get(
+                f"{SPOTIFY_API_BASE}/recommendations",
+                params={
+                    "seed_tracks": ",".join(seed_track_ids),
+                    "limit": 100,  # Request more to filter for preview_url
+                    "market": "DE",
+                },
+                headers=headers,
+            )
+        if rec_resp.status_code != 200:
+            logger.error(f"Swipe recommendations failed: {rec_resp.status_code} {rec_resp.text[:300]}")
+            raise HTTPException(status_code=rec_resp.status_code, detail="Empfehlungen konnten nicht geladen werden")
+
+        rec_tracks = rec_resp.json().get("tracks", [])
+
+        # 3. Filter: only tracks WITH a preview_url
+        tracks_with_preview = []
+        for t in rec_tracks:
+            preview = t.get("preview_url")
+            if not preview:
+                continue
+            images = t.get("album", {}).get("images", [])
+            tracks_with_preview.append({
+                "id": t["id"],
+                "title": t["name"],
+                "artist": ", ".join(a["name"] for a in t.get("artists", [])),
+                "album": t.get("album", {}).get("name", ""),
+                "album_image": images[0]["url"] if images else None,
+                "preview_url": preview,
+                "spotify_uri": t.get("uri", ""),
+            })
+
+        logger.info(f"Swipe Deck: {len(tracks_with_preview)}/{len(rec_tracks)} tracks have previews")
+
+        return {"tracks": tracks_with_preview[:30]}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Swipe Deck failed: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Swipe Deck konnte nicht geladen werden: {str(e)}",
+        )
+
+
+# ── Swipe Deck: Save track to Liked Songs ─────────────
+@router.post("/library/save")
+async def save_to_library(
+    payload: SaveTracksRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Save tracks to the user's Liked Songs on Spotify."""
+    spotify_token = await get_valid_spotify_token(current_user, db)
+
+    async with httpx.AsyncClient() as client:
+        resp = await client.put(
+            f"{SPOTIFY_API_BASE}/me/tracks",
+            headers={"Authorization": f"Bearer {spotify_token}"},
+            json={"ids": payload.track_ids},
+        )
+
+    if resp.status_code not in (200, 201):
+        logger.error(f"Save to library failed: {resp.status_code} {resp.text[:300]}")
+        raise HTTPException(
+            status_code=resp.status_code,
+            detail=f"Song konnte nicht gespeichert werden: {resp.text[:200]}",
+        )
+
+    return {"saved": len(payload.track_ids), "already_saved": 0}
+
+
+# ── Vibe Roast ────────────────────────────────────────
+@router.get("/vibe-roast", response_model=RoastResponse)
+async def vibe_roast(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Generate a sarcastic AI roast of the user's music taste."""
+    spotify_token = await get_valid_spotify_token(current_user, db)
+
+    try:
+        result = await generate_vibe_roast(spotify_token)
+        return result
+    except Exception as e:
+        logger.error(f"Vibe Roast failed: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Vibe Roast fehlgeschlagen: {str(e)}",
+        )
 
 
 # ── Health check ──────────────────────────────────────
