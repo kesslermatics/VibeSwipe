@@ -10,11 +10,13 @@ logger = logging.getLogger(__name__)
 from app.config import get_settings
 from app.database import get_db
 from app.models import User
-from app.schemas import SpotifyCallback, Token, UserResponse, MessageResponse, DiscoverRequest, DiscoverResponse, CreatePlaylistRequest, CreatePlaylistResponse, SaveTracksRequest, SaveTracksResponse, DailyDriveRequest, DailyDriveResponse, GymPlaylistRequest, GymPlaylistResponse
+from app.schemas import SpotifyCallback, Token, UserResponse, MessageResponse, DiscoverRequest, DiscoverResponse, CreatePlaylistRequest, CreatePlaylistResponse, SaveTracksRequest, SaveTracksResponse, DailyDriveRequest, DailyDriveResponse, GymPlaylistGenerateRequest, GymPlaylistGenerateResponse, GymPlaylistSettingsResponse, GymPlaylistAutoRefreshRequest
 from app.auth import create_access_token, get_current_user, get_valid_spotify_token, refresh_spotify_token
 from app.discover import discover_songs
 from app.daily_drive import fetch_saved_shows, generate_daily_drive
 from app.gym_playlist import generate_gym_playlist
+from app.models import GymPlaylistSettings
+import json
 
 router = APIRouter()
 settings = get_settings()
@@ -458,13 +460,78 @@ async def generate_daily_drive_playlist(
 
 
 # ── Gym Playlist: Generate ───────────────────────────
-@router.post("/gym-playlist", response_model=GymPlaylistResponse)
-async def gym_playlist(
-    payload: GymPlaylistRequest,
+@router.post("/gym-playlist/generate", response_model=GymPlaylistGenerateResponse)
+async def gym_playlist_generate(
+    payload: GymPlaylistGenerateRequest,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    return await generate_gym_playlist(payload, current_user, db)
+    try:
+        result = await generate_gym_playlist(
+            source_playlist_ids=payload.source_playlist_ids,
+            current_user=current_user,
+            db=db,
+        )
+        return result
+    except Exception as e:
+        logger.error(f"Gym playlist generation failed: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Gym Playlist Erstellung fehlgeschlagen: {str(e)}",
+        )
+
+
+# ── Gym Playlist: Get settings ───────────────────────
+@router.get("/gym-playlist/settings", response_model=GymPlaylistSettingsResponse)
+def gym_playlist_get_settings(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    settings = (
+        db.query(GymPlaylistSettings)
+        .filter(GymPlaylistSettings.user_id == current_user.id)
+        .first()
+    )
+    if not settings:
+        return {
+            "auto_refresh": False,
+            "source_playlist_ids": [],
+            "last_spotify_playlist_id": None,
+        }
+    return {
+        "auto_refresh": settings.auto_refresh,
+        "source_playlist_ids": json.loads(settings.source_playlist_ids or "[]"),
+        "last_spotify_playlist_id": settings.last_spotify_playlist_id,
+    }
+
+
+# ── Gym Playlist: Toggle auto-refresh ────────────────
+@router.put("/gym-playlist/auto-refresh")
+def gym_playlist_toggle_auto_refresh(
+    payload: GymPlaylistAutoRefreshRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    settings = (
+        db.query(GymPlaylistSettings)
+        .filter(GymPlaylistSettings.user_id == current_user.id)
+        .first()
+    )
+    if not settings:
+        settings = GymPlaylistSettings(
+            user_id=current_user.id,
+            auto_refresh=payload.auto_refresh,
+            source_playlist_ids="[]",
+        )
+        db.add(settings)
+    else:
+        settings.auto_refresh = payload.auto_refresh
+
+    db.commit()
+    return {
+        "auto_refresh": settings.auto_refresh,
+        "message": "Auto-Refresh aktiviert" if payload.auto_refresh else "Auto-Refresh deaktiviert",
+    }
 
 
 # ── Health check ──────────────────────────────────────

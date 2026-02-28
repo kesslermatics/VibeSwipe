@@ -5,6 +5,7 @@ import CallbackPage from "./pages/CallbackPage";
 import HomePage from "./pages/HomePage";
 import DiscoverPage from "./pages/DiscoverPage";
 import DailyDrivePage from "./pages/DailyDrivePage";
+import GymPlaylistPage from "./pages/GymPlaylistPage";
 
 function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(!!localStorage.getItem("token"));
@@ -31,6 +32,7 @@ function App() {
         <Route path="/" element={isLoggedIn ? <HomePage onLogout={logout} /> : <Navigate to="/login" replace />} />
         <Route path="/discover" element={isLoggedIn ? <DiscoverPage onLogout={logout} /> : <Navigate to="/login" replace />} />
         <Route path="/daily-drive" element={isLoggedIn ? <DailyDrivePage onLogout={logout} /> : <Navigate to="/login" replace />} />
+        <Route path="/gym-playlist" element={isLoggedIn ? <GymPlaylistPage onLogout={logout} /> : <Navigate to="/login" replace />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </div>

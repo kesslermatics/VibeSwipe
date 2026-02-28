@@ -50,6 +50,14 @@ const tiles: Tile[] = [
         color: "from-sky-500/20 to-blue-500/10 hover:ring-sky-500/40",
         route: "/",
     },
+    {
+        id: "gym-playlist",
+        emoji: "🏋️‍♂️",
+        title: "Gym Playlist",
+        description: "Erstelle eine motivierende Gym-Playlist aus deinen Playlists",
+        color: "from-pink-500/20 to-red-500/10 hover:ring-pink-500/40",
+        route: "/gym-playlist",
+    },
 ];
 
 export default function HomePage({ onLogout }: { onLogout: () => void }) {
@@ -100,7 +108,8 @@ export default function HomePage({ onLogout }: { onLogout: () => void }) {
                 {/* Feature Tiles */}
                 <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                     {tiles.map((tile) => {
-                        const isAvailable = tile.id === "discover" || tile.id === "daily-drive";
+                        // Gym Playlist ist jetzt verfügbar
+                        const isAvailable = tile.id === "discover" || tile.id === "daily-drive" || tile.id === "gym-playlist";
                         return (
                             <button
                                 key={tile.id}

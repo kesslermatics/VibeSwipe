@@ -84,14 +84,24 @@ class DailyDriveResponse(BaseModel):
 
 
 # ── Gym Playlist ─────────────────────────────────────
-class GymPlaylistRequest(BaseModel):
-    playlist_ids: list[str]
+class GymPlaylistGenerateRequest(BaseModel):
+    source_playlist_ids: list[str]
 
 
-class GymPlaylistResponse(BaseModel):
+class GymPlaylistGenerateResponse(BaseModel):
     playlist_url: str
     playlist_id: str
-    name: str
+    playlist_name: str
     total_tracks: int
-    inspiration_songs: list[str]
-    gemini_prompt: str
+    inspiration_count: int
+    auto_refresh: bool
+
+
+class GymPlaylistSettingsResponse(BaseModel):
+    auto_refresh: bool
+    source_playlist_ids: list[str]
+    last_spotify_playlist_id: str | None
+
+
+class GymPlaylistAutoRefreshRequest(BaseModel):
+    auto_refresh: bool

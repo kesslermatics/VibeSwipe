@@ -37,12 +37,3 @@ export async function getUserPlaylists() {
   const res = await api<{ playlists: any[] }>("/my-playlists", { token });
   return res.playlists;
 }
-
-export async function createGymPlaylist(playlistIds: string[]) {
-  const token = localStorage.getItem("token") || "";
-  return api<{ message: string }>("/gym-playlist", {
-    method: "POST",
-    body: { playlist_ids: playlistIds },
-    token,
-  });
-}

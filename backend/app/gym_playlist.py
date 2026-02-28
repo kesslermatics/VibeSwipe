@@ -1,101 +1,454 @@
-from pydantic import BaseModel
-import httpx
-from fastapi import Depends, HTTPException
-from sqlalchemy.orm import Session
-from app.auth import get_current_user, get_valid_spotify_token
-from app.models import User
-from app.schemas import GymPlaylistRequest, GymPlaylistResponse
-from app.database import get_db
-from app.discover import ask_gemini
+"""
+Gym Playlist generator – personalized workout playlist.
+
+Flow:
+1. User selects source playlists as inspiration
+2. Fetch tracks from those playlists
+3. Sample up to 15 inspiration tracks
+4. Ask Gemini to generate 30 high-energy gym songs based on the user's taste
+5. Search each song on Spotify (with Redis cache)
+6. Delete old gym playlist if it exists
+7. Create a new Spotify playlist with a unique date-based name
+8. Optionally: auto-refresh daily at 3 AM (scheduler in main.py)
+"""
+
+import json
 import random
+import asyncio
+import logging
+from datetime import date
 
-class GymPlaylistRequest(BaseModel):
-    playlist_ids: list[str]
+import httpx
+import redis
+from sqlalchemy.orm import Session
 
-class GymPlaylistResponse(BaseModel):
-    playlist_url: str
-    playlist_id: str
-    name: str
-    total_tracks: int
-    inspiration_songs: list[str]
-    gemini_prompt: str
+from app.config import get_settings
+from app.database import SessionLocal
+from app.models import User, GymPlaylistSettings
+from app.auth import get_valid_spotify_token
+
+settings = get_settings()
+logger = logging.getLogger(__name__)
+
+SPOTIFY_API = "https://api.spotify.com/v1"
+
+GEMINI_URL = (
+    f"https://generativelanguage.googleapis.com/v1beta/models/"
+    f"gemini-3-flash-preview:generateContent?key={settings.gemini_api_key}"
+)
+
+# Redis Client
+redis_client = redis.Redis.from_url(settings.redis_url, decode_responses=True)
+
+
+def song_cache_key(title: str, artist: str) -> str:
+    return f"song_uri::{title.lower().strip()}|||{artist.lower().strip()}"
+
+
+# ── Spotify helpers ───────────────────────────────────
+
+
+async def fetch_playlist_tracks(playlist_id: str, spotify_token: str) -> list[dict]:
+    """Fetch all tracks from a Spotify playlist."""
+    tracks: list[dict] = []
+    url = f"{SPOTIFY_API}/playlists/{playlist_id}/tracks"
+    params: dict = {
+        "fields": "items(track(name,artists(name),uri)),next",
+        "limit": 100,
+    }
+    headers = {"Authorization": f"Bearer {spotify_token}"}
+
+    async with httpx.AsyncClient() as client:
+        while url:
+            resp = await client.get(url, params=params, headers=headers)
+            if resp.status_code != 200:
+                logger.warning(
+                    f"Failed to fetch tracks for playlist {playlist_id}: "
+                    f"{resp.status_code} {resp.text[:200]}"
+                )
+                break
+
+            data = resp.json()
+            for item in data.get("items", []):
+                track = item.get("track")
+                if track and track.get("name"):
+                    tracks.append({
+                        "title": track["name"],
+                        "artist": ", ".join(
+                            a["name"] for a in track.get("artists", [])
+                        ),
+                        "uri": track.get("uri", ""),
+                    })
+            url = data.get("next")
+            params = {}
+
+    return tracks
+
+
+async def robust_spotify_search(
+    query: str, spotify_token: str, max_retries: int = 3
+) -> dict | None:
+    """Spotify search with retry-after handling."""
+    headers = {"Authorization": f"Bearer {spotify_token}"}
+    params = {"q": query, "type": "track", "limit": 1}
+
+    for attempt in range(max_retries):
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f"{SPOTIFY_API}/search", params=params, headers=headers
+            )
+        if resp.status_code == 200:
+            items = resp.json().get("tracks", {}).get("items", [])
+            if not items:
+                return None
+            track = items[0]
+            return {
+                "title": track["name"],
+                "artist": ", ".join(a["name"] for a in track["artists"]),
+                "uri": track["uri"],
+            }
+        if resp.status_code == 429:
+            retry_after = resp.headers.get("Retry-After", "3")
+            wait = min(int(retry_after), 30) if retry_after.isdigit() else 3
+            logger.warning(
+                f"Spotify search 429 for '{query}', waiting {wait}s "
+                f"(attempt {attempt + 1}/{max_retries})"
+            )
+            await asyncio.sleep(wait)
+            continue
+        logger.warning(f"Spotify search failed for '{query}': {resp.status_code}")
+        return None
+
+    return None
+
+
+async def robust_spotify_search_with_cache(
+    title: str, artist: str, spotify_token: str
+) -> dict | None:
+    """Search Spotify with Redis cache."""
+    key = song_cache_key(title, artist)
+    try:
+        cached = redis_client.get(key)
+        if cached and cached.startswith("spotify:track:"):
+            return {"title": title, "artist": artist, "uri": cached}
+    except Exception:
+        pass
+
+    result = await robust_spotify_search(f"{title} {artist}", spotify_token)
+    if result and result.get("uri"):
+        try:
+            redis_client.set(key, result["uri"])
+        except Exception:
+            pass
+        return result
+    return None
+
+
+async def delete_spotify_playlist(
+    playlist_id: str, spotify_token: str
+) -> bool:
+    """Unfollow (delete) a Spotify playlist. Returns True on success."""
+    async with httpx.AsyncClient() as client:
+        resp = await client.delete(
+            f"{SPOTIFY_API}/playlists/{playlist_id}/followers",
+            headers={"Authorization": f"Bearer {spotify_token}"},
+        )
+    if resp.status_code == 200:
+        logger.info(f"Deleted old gym playlist {playlist_id}")
+        return True
+    logger.warning(
+        f"Failed to delete playlist {playlist_id}: {resp.status_code} {resp.text[:200]}"
+    )
+    return False
+
+
+async def robust_add_items(
+    client: httpx.AsyncClient,
+    playlist_id: str,
+    uris: list[str],
+    headers: dict,
+    max_retries: int = 3,
+) -> bool:
+    """Add items to a playlist with retry logic."""
+    for attempt in range(max_retries):
+        resp = await client.post(
+            f"{SPOTIFY_API}/playlists/{playlist_id}/tracks",
+            headers=headers,
+            json={"uris": uris},
+        )
+        if resp.status_code in (200, 201):
+            return True
+        if resp.status_code == 429:
+            wait = min(int(resp.headers.get("Retry-After", "3")), 30)
+            await asyncio.sleep(wait)
+            continue
+        logger.error(f"Failed to add tracks: {resp.status_code} {resp.text[:300]}")
+        return False
+    return False
+
+
+# ── Gemini ────────────────────────────────────────────
+
+
+async def ask_gemini_gym(inspiration_songs: list[str]) -> dict:
+    """Ask Gemini for a gym playlist based on inspiration songs."""
+    song_list = "\n".join(f"- {s}" for s in inspiration_songs)
+
+    prompt = f"""You are a music expert specializing in gym and workout playlists.
+
+I will give you a list of songs that represent the user's music taste.
+
+Your task: Create a killer gym/workout playlist with exactly 30 songs that:
+- Match the user's taste and style based on the inspiration songs
+- Are high-energy, motivating, and perfect for intense workouts
+- Push hard – no ballads, no slow songs, no chill vibes
+- Mix well-known bangers with some hidden gems
+- Include songs that build energy and keep the momentum going
+
+DO NOT include any of the inspiration songs in your recommendations.
+
+Respond ONLY with valid JSON in this exact format:
+{{
+  "songs": [
+    {{"title": "Song Name", "artist": "Artist Name"}},
+    ...
+  ]
+}}
+
+Rules:
+- Exactly 30 songs
+- No duplicates
+- Only high-energy workout tracks
+- Only output valid JSON, no markdown, no explanation
+
+Here are the user's inspiration songs:
+{song_list}"""
+
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {
+            "temperature": 1.8,
+            "maxOutputTokens": 8192,
+        },
+    }
+
+    async with httpx.AsyncClient(timeout=60) as client:
+        resp = await client.post(GEMINI_URL, json=payload)
+
+    if resp.status_code != 200:
+        raise Exception(f"Gemini API error: {resp.status_code} – {resp.text[:300]}")
+
+    data = resp.json()
+    try:
+        text = data["candidates"][0]["content"]["parts"][0]["text"]
+    except (KeyError, IndexError) as e:
+        raise Exception(f"Unexpected Gemini response: {e}")
+
+    text = text.strip()
+    if text.startswith("```"):
+        text = text.split("\n", 1)[1]
+        if text.endswith("```"):
+            text = text[:-3]
+        text = text.strip()
+
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as e:
+        logger.error(f"Gemini returned invalid JSON: {text[:500]}")
+        raise Exception(f"Gemini returned invalid JSON: {e}")
+
+
+# ── Main generation pipeline ─────────────────────────
+
 
 async def generate_gym_playlist(
-    payload: GymPlaylistRequest,
+    source_playlist_ids: list[str],
     current_user: User,
     db: Session,
-):
+) -> dict:
+    """
+    Full gym playlist generation pipeline.
+    """
     spotify_token = await get_valid_spotify_token(current_user, db)
-    # 1. Hole Songs aus den gewählten Playlists
-    all_tracks = []
-    playlist_names = []
-    async with httpx.AsyncClient() as client:
-        for pid in payload.playlist_ids:
-            r = await client.get(
-                f"https://api.spotify.com/v1/playlists/{pid}/tracks",
-                headers={"Authorization": f"Bearer {spotify_token}"},
-                params={"fields": "items(track(name,artists(name))),total", "limit": 100},
-            )
-            if r.status_code == 200:
-                tracks = r.json()["items"]
-                for t in tracks:
-                    track = t["track"]
-                    if track:
-                        name = track["name"]
-                        artist = track["artists"][0]["name"]
-                        all_tracks.append(f"{name} - {artist}")
-                playlist_names.append(pid)
-    # 2. Wähle bis zu 10 Inspiration-Songs
-    inspiration = random.sample(all_tracks, min(10, len(all_tracks)))
-    # 3. Baue Prompt für Gemini
-    prompt = (
-        "Erstelle eine Gym/Workout Playlist mit 25 Songs, die richtig motivieren, Power geben und Testosteron pushen. "
-        "Die ersten 10 Songs sollen sich am Stil und Geschmack dieser Songs orientieren: "
-        + ", ".join(inspiration)
-        + ". Die restlichen 15 Songs sollen noch mehr auf Energie, Kraft, Motivation und Gym-Vibes setzen. "
-        "Bitte keine Songs doppelt, keine Balladen, keine ruhigen Songs. Nur Tracks, die beim Training richtig pushen! "
-        "Gib die Antwort als JSON wie gehabt zurück."
+
+    # 1. Fetch tracks from all selected playlists
+    logger.info(
+        f"Gym Playlist: Fetching tracks from {len(source_playlist_ids)} playlists..."
     )
-    gemini_result = await ask_gemini(prompt, context_songs=inspiration)
-    # 4. Suche Spotify-URIs für die Gemini-Songs
-    uris = []
-    async with httpx.AsyncClient() as client:
-        for song in gemini_result["songs"]:
-            q = f"{song['title']} {song['artist']}"
-            r = await client.get(
-                "https://api.spotify.com/v1/search",
-                headers={"Authorization": f"Bearer {spotify_token}"},
-                params={"q": q, "type": "track", "limit": 1},
-            )
-            if r.status_code == 200:
-                items = r.json().get("tracks", {}).get("items", [])
-                if items:
-                    uris.append(items[0]["uri"])
-    # 5. Erstelle Playlist bei Spotify
-    playlist_name = "🏋️‍♂️ Gym Power Mix"
-    async with httpx.AsyncClient() as client:
-        r = await client.post(
-            f"https://api.spotify.com/v1/users/{current_user.spotify_id}/playlists",
-            headers={"Authorization": f"Bearer {spotify_token}"},
-            json={"name": playlist_name, "description": "Dein Gym Power Mix von VibeSwipe", "public": False},
+    all_tracks: list[dict] = []
+    for pid in source_playlist_ids:
+        tracks = await fetch_playlist_tracks(pid, spotify_token)
+        all_tracks.extend(tracks)
+        if len(source_playlist_ids) > 1:
+            await asyncio.sleep(0.3)
+
+    if len(all_tracks) < 5:
+        raise Exception(
+            "Zu wenige Songs in den ausgewählten Playlists. "
+            "Wähle Playlists mit mehr Songs aus!"
         )
-        if r.status_code != 201:
-            raise HTTPException(500, "Playlist konnte nicht erstellt werden")
-        playlist = r.json()
-        playlist_id = playlist["id"]
-        playlist_url = playlist["external_urls"]["spotify"]
-        # Füge Songs hinzu
-        for i in range(0, len(uris), 100):
-            await client.post(
-                f"https://api.spotify.com/v1/playlists/{playlist_id}/tracks",
-                headers={"Authorization": f"Bearer {spotify_token}"},
-                json={"uris": uris[i:i+100]},
-            )
-    return GymPlaylistResponse(
-        playlist_url=playlist_url,
-        playlist_id=playlist_id,
-        name=playlist_name,
-        total_tracks=len(uris),
-        inspiration_songs=inspiration,
-        gemini_prompt=prompt,
+
+    logger.info(f"Gym Playlist: Got {len(all_tracks)} total tracks")
+
+    # 2. Sample inspiration songs (up to 15)
+    sample_size = min(15, len(all_tracks))
+    sampled = random.sample(all_tracks, sample_size)
+    inspiration = [f"{t['title']} - {t['artist']}" for t in sampled]
+    logger.info(f"Gym Playlist: Using {len(inspiration)} inspiration songs")
+
+    # 3. Ask Gemini
+    logger.info("Gym Playlist: Asking Gemini for recommendations...")
+    gemini_result = await ask_gemini_gym(inspiration)
+    gemini_songs = gemini_result.get("songs", [])
+    logger.info(f"Gym Playlist: Gemini returned {len(gemini_songs)} songs")
+
+    # 4. Search each song on Spotify (sequential with delay)
+    logger.info("Gym Playlist: Searching songs on Spotify...")
+    uris: list[str] = []
+    for song in gemini_songs:
+        result = await robust_spotify_search_with_cache(
+            song["title"], song["artist"], spotify_token
+        )
+        if result and result.get("uri"):
+            uris.append(result["uri"])
+        await asyncio.sleep(1.0)
+
+    logger.info(f"Gym Playlist: Found {len(uris)} tracks on Spotify")
+
+    if len(uris) < 10:
+        raise Exception(
+            "Zu wenige Songs auf Spotify gefunden. Bitte versuche es erneut!"
+        )
+
+    # 5. Delete old gym playlist if it exists
+    gym_settings = (
+        db.query(GymPlaylistSettings)
+        .filter(GymPlaylistSettings.user_id == current_user.id)
+        .first()
     )
+    if gym_settings and gym_settings.last_spotify_playlist_id:
+        logger.info(
+            f"Gym Playlist: Deleting old playlist {gym_settings.last_spotify_playlist_id}"
+        )
+        await delete_spotify_playlist(
+            gym_settings.last_spotify_playlist_id, spotify_token
+        )
+
+    # 6. Create new playlist with unique name
+    today = date.today().strftime("%d.%m.%Y")
+    playlist_name = f"🏋️ VibeSwipe Gym Mix – {today}"
+    playlist_desc = (
+        f"Dein persönlicher Gym Power Mix von VibeSwipe 💪 "
+        f"{len(uris)} motivierende Tracks"
+    )
+
+    auth_headers = {"Authorization": f"Bearer {spotify_token}"}
+
+    async with httpx.AsyncClient() as client:
+        create_resp = await client.post(
+            f"{SPOTIFY_API}/users/{current_user.spotify_id}/playlists",
+            headers=auth_headers,
+            json={
+                "name": playlist_name,
+                "description": playlist_desc,
+                "public": False,
+            },
+        )
+
+        if create_resp.status_code not in (200, 201):
+            raise Exception(
+                f"Playlist konnte nicht erstellt werden: {create_resp.text[:300]}"
+            )
+
+        playlist = create_resp.json()
+        playlist_id = playlist["id"]
+
+        for i in range(0, len(uris), 100):
+            chunk = uris[i : i + 100]
+            success = await robust_add_items(
+                client, playlist_id, chunk, auth_headers
+            )
+            if not success:
+                logger.error(f"Failed to add chunk {i} to gym playlist")
+
+    # 7. Save/update settings in DB
+    if not gym_settings:
+        gym_settings = GymPlaylistSettings(
+            user_id=current_user.id,
+            source_playlist_ids=json.dumps(source_playlist_ids),
+            last_spotify_playlist_id=playlist_id,
+            auto_refresh=False,
+        )
+        db.add(gym_settings)
+    else:
+        gym_settings.source_playlist_ids = json.dumps(source_playlist_ids)
+        gym_settings.last_spotify_playlist_id = playlist_id
+
+    db.commit()
+
+    return {
+        "playlist_url": playlist["external_urls"]["spotify"],
+        "playlist_id": playlist_id,
+        "playlist_name": playlist_name,
+        "total_tracks": len(uris),
+        "inspiration_count": len(inspiration),
+        "auto_refresh": gym_settings.auto_refresh,
+    }
+
+
+# ── Auto-refresh job (called by scheduler) ───────────
+
+
+async def auto_refresh_gym_playlists():
+    """
+    Scheduled job: regenerate gym playlists for all users with auto_refresh=True.
+    Called daily at 3:00 AM.
+    """
+    logger.info("Gym Playlist Auto-Refresh: Starting...")
+
+    db = SessionLocal()
+    try:
+        settings_list = (
+            db.query(GymPlaylistSettings)
+            .filter(GymPlaylistSettings.auto_refresh == True)  # noqa: E712
+            .all()
+        )
+        logger.info(
+            f"Gym Playlist Auto-Refresh: Found {len(settings_list)} users with auto-refresh"
+        )
+
+        for gym_settings in settings_list:
+            try:
+                user = db.query(User).filter(User.id == gym_settings.user_id).first()
+                if not user:
+                    logger.warning(
+                        f"Auto-Refresh: User {gym_settings.user_id} not found, skipping"
+                    )
+                    continue
+
+                source_ids = json.loads(gym_settings.source_playlist_ids or "[]")
+                if not source_ids:
+                    logger.warning(
+                        f"Auto-Refresh: User {user.spotify_id} has no source playlists, skipping"
+                    )
+                    continue
+
+                logger.info(
+                    f"Auto-Refresh: Generating gym playlist for user {user.spotify_id}..."
+                )
+                await generate_gym_playlist(source_ids, user, db)
+                logger.info(f"Auto-Refresh: Success for user {user.spotify_id}")
+
+                await asyncio.sleep(5)
+
+            except Exception as e:
+                logger.error(
+                    f"Auto-Refresh: Failed for user {gym_settings.user_id}: {e}",
+                    exc_info=True,
+                )
+                continue
+
+    finally:
+        db.close()
+
+    logger.info("Gym Playlist Auto-Refresh: Done.")
