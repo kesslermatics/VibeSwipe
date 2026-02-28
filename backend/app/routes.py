@@ -564,29 +564,62 @@ async def get_swipe_deck(
     try:
         import asyncio, random
 
-        # 1. Get user's top artists (short_term for current taste)
-        async with httpx.AsyncClient() as client:
-            top_resp = await client.get(
-                f"{SPOTIFY_API_BASE}/me/top/artists",
-                params={"limit": 10, "time_range": "short_term"},
-                headers=headers,
-            )
-        if top_resp.status_code != 200:
-            raise HTTPException(status_code=top_resp.status_code, detail="Konnte Top-Artists nicht laden")
+        # ── 0. Fetch user's saved/liked track IDs to exclude ──
+        saved_ids: set[str] = set()
+        try:
+            offset = 0
+            while offset < 500:  # Cap at 500 to avoid slow requests
+                async with httpx.AsyncClient() as client:
+                    saved_resp = await client.get(
+                        f"{SPOTIFY_API_BASE}/me/tracks",
+                        params={"limit": 50, "offset": offset},
+                        headers=headers,
+                    )
+                if saved_resp.status_code != 200:
+                    print(f"SWIPE: Saved tracks fetch failed: {saved_resp.status_code}")
+                    break
+                items = saved_resp.json().get("items", [])
+                if not items:
+                    break
+                for item in items:
+                    track = item.get("track")
+                    if track:
+                        saved_ids.add(track["id"])
+                offset += 50
+            print(f"SWIPE: Loaded {len(saved_ids)} saved track IDs to exclude")
+        except Exception as e:
+            print(f"SWIPE: Could not load saved tracks: {e}")
 
-        top_artists = top_resp.json().get("items", [])
-        if len(top_artists) < 1:
+        # ── 1. Get user's top artists (try short → medium → long) ──
+        top_artists: list[dict] = []
+        for time_range in ["short_term", "medium_term", "long_term"]:
+            async with httpx.AsyncClient() as client:
+                top_resp = await client.get(
+                    f"{SPOTIFY_API_BASE}/me/top/artists",
+                    params={"limit": 20, "time_range": time_range},
+                    headers=headers,
+                )
+            if top_resp.status_code == 200:
+                top_artists = top_resp.json().get("items", [])
+                if top_artists:
+                    print(f"SWIPE: Got {len(top_artists)} top artists from {time_range}")
+                    break
+            else:
+                print(f"SWIPE: top/artists {time_range} failed: {top_resp.status_code}")
+
+        if not top_artists:
             raise HTTPException(
                 status_code=400,
-                detail="Du brauchst mindestens ein paar gehörte Songs für Swipe-Empfehlungen!",
+                detail="Keine Top-Artists gefunden. Hör mehr Musik und versuch es später!",
             )
 
-        # 2. Get related artists for each top artist
-        related_artist_ids: set[str] = set()
+        # ── 2. Try related-artists first, fall back to top artists directly ──
+        artist_ids_for_tracks: list[str] = []
         top_artist_ids = {a["id"] for a in top_artists}
 
+        # Try related artists for discovery
         for artist in top_artists[:5]:
-            await asyncio.sleep(0.2)  # light rate-limit spacing
+            await asyncio.sleep(0.15)
             async with httpx.AsyncClient() as client:
                 rel_resp = await client.get(
                     f"{SPOTIFY_API_BASE}/artists/{artist['id']}/related-artists",
@@ -595,19 +628,29 @@ async def get_swipe_deck(
             if rel_resp.status_code == 200:
                 for ra in rel_resp.json().get("artists", []):
                     if ra["id"] not in top_artist_ids:
-                        related_artist_ids.add(ra["id"])
+                        artist_ids_for_tracks.append(ra["id"])
+            elif rel_resp.status_code == 403:
+                print("SWIPE: related-artists returned 403 (dev-mode). Using top artists directly.")
+                break
 
-        logger.info(f"Swipe Deck: Found {len(related_artist_ids)} related artists")
+        # Deduplicate
+        artist_ids_for_tracks = list(dict.fromkeys(artist_ids_for_tracks))
 
-        if not related_artist_ids:
-            raise HTTPException(status_code=404, detail="Keine verwandten Artists gefunden")
+        # If related-artists gave nothing, use the user's own top artists
+        if not artist_ids_for_tracks:
+            print("SWIPE: No related artists found. Falling back to user's top artists.")
+            artist_ids_for_tracks = [a["id"] for a in top_artists]
 
-        # 3. Get top tracks from a random sample of related artists
-        sampled = random.sample(list(related_artist_ids), min(8, len(related_artist_ids)))
+        print(f"SWIPE: Using {len(artist_ids_for_tracks)} artists for track discovery")
+
+        # ── 3. Get top tracks from a random sample of those artists ──
+        sampled = random.sample(
+            artist_ids_for_tracks, min(10, len(artist_ids_for_tracks))
+        )
         all_tracks: list[dict] = []
 
         for artist_id in sampled:
-            await asyncio.sleep(0.2)
+            await asyncio.sleep(0.15)
             async with httpx.AsyncClient() as client:
                 tt_resp = await client.get(
                     f"{SPOTIFY_API_BASE}/artists/{artist_id}/top-tracks",
@@ -616,8 +659,12 @@ async def get_swipe_deck(
                 )
             if tt_resp.status_code == 200:
                 all_tracks.extend(tt_resp.json().get("tracks", []))
+            else:
+                print(f"SWIPE: top-tracks for {artist_id} failed: {tt_resp.status_code}")
 
-        # 4. Deduplicate by track ID, filter for preview_url
+        print(f"SWIPE: Collected {len(all_tracks)} total tracks from artists")
+
+        # ── 4. Deduplicate, exclude saved songs, filter for preview_url ──
         seen_ids: set[str] = set()
         tracks_with_preview: list[dict] = []
         random.shuffle(all_tracks)
@@ -625,7 +672,7 @@ async def get_swipe_deck(
         for t in all_tracks:
             tid = t["id"]
             preview = t.get("preview_url")
-            if tid in seen_ids or not preview:
+            if tid in seen_ids or tid in saved_ids or not preview:
                 continue
             seen_ids.add(tid)
             images = t.get("album", {}).get("images", [])
@@ -639,12 +686,15 @@ async def get_swipe_deck(
                 "spotify_uri": t.get("uri", ""),
             })
 
-        logger.info(f"Swipe Deck: {len(tracks_with_preview)}/{len(all_tracks)} tracks have previews")
+        print(
+            f"SWIPE: {len(tracks_with_preview)} tracks with preview "
+            f"(filtered {len(saved_ids)} saved, {len(all_tracks)} total)"
+        )
 
         if not tracks_with_preview:
             raise HTTPException(
                 status_code=404,
-                detail="Keine Songs mit Preview gefunden. Versuche es später nochmal!",
+                detail="Keine neuen Songs mit Preview gefunden. Versuche es später nochmal!",
             )
 
         return {"tracks": tracks_with_preview[:30]}
