@@ -233,15 +233,15 @@ export default function GymPlaylistPage({ onLogout: _onLogout }: { onLogout: () 
                                                 key={pl.id}
                                                 onClick={() => togglePlaylist(pl.id)}
                                                 className={`flex w-full items-center gap-3 rounded-xl p-3 text-left transition-all ${isSelected
-                                                        ? "bg-red-500/15 ring-1 ring-red-500/30"
-                                                        : "bg-white/5 hover:bg-white/10"
+                                                    ? "bg-red-500/15 ring-1 ring-red-500/30"
+                                                    : "bg-white/5 hover:bg-white/10"
                                                     }`}
                                             >
                                                 {/* Checkbox */}
                                                 <div
                                                     className={`flex h-5 w-5 flex-shrink-0 items-center justify-center rounded transition-all ${isSelected
-                                                            ? "bg-red-500 text-white"
-                                                            : "bg-white/10 ring-1 ring-white/20"
+                                                        ? "bg-red-500 text-white"
+                                                        : "bg-white/10 ring-1 ring-white/20"
                                                         }`}
                                                 >
                                                     {isSelected && (
@@ -294,8 +294,8 @@ export default function GymPlaylistPage({ onLogout: _onLogout }: { onLogout: () 
                             <button
                                 onClick={handleToggleAutoRefresh}
                                 className={`flex w-full items-center gap-4 rounded-2xl p-4 text-left transition-all ${autoRefresh
-                                        ? "bg-red-500/10 ring-1 ring-red-500/30"
-                                        : "bg-white/5 ring-1 ring-white/10 hover:bg-white/10"
+                                    ? "bg-red-500/10 ring-1 ring-red-500/30"
+                                    : "bg-white/5 ring-1 ring-white/10 hover:bg-white/10"
                                     }`}
                             >
                                 {/* Toggle switch */}
@@ -326,8 +326,8 @@ export default function GymPlaylistPage({ onLogout: _onLogout }: { onLogout: () 
                             onClick={handleGenerate}
                             disabled={selectedIds.size === 0}
                             className={`flex w-full items-center justify-center gap-3 rounded-2xl px-6 py-4 text-base font-bold shadow-lg transition ${selectedIds.size === 0
-                                    ? "cursor-not-allowed bg-gray-700 text-gray-500"
-                                    : "bg-gradient-to-r from-red-500 to-orange-500 text-white shadow-red-500/25 hover:shadow-red-500/40 hover:brightness-110"
+                                ? "cursor-not-allowed bg-gray-700 text-gray-500"
+                                : "bg-gradient-to-r from-red-500 to-orange-500 text-white shadow-red-500/25 hover:shadow-red-500/40 hover:brightness-110"
                                 }`}
                         >
                             <span className="text-xl">🏋️</span>
@@ -349,10 +349,10 @@ export default function GymPlaylistPage({ onLogout: _onLogout }: { onLogout: () 
                                     <div
                                         key={i}
                                         className={`flex items-center gap-3 rounded-xl px-4 py-3 transition-all duration-500 ${isActive
-                                                ? "bg-red-500/15 ring-1 ring-red-500/30"
-                                                : isDone
-                                                    ? "bg-green-500/10 ring-1 ring-green-500/20"
-                                                    : "bg-white/5 opacity-40"
+                                            ? "bg-red-500/15 ring-1 ring-red-500/30"
+                                            : isDone
+                                                ? "bg-green-500/10 ring-1 ring-green-500/20"
+                                                : "bg-white/5 opacity-40"
                                             }`}
                                     >
                                         <span className="text-lg">
@@ -360,10 +360,10 @@ export default function GymPlaylistPage({ onLogout: _onLogout }: { onLogout: () 
                                         </span>
                                         <span
                                             className={`text-sm ${isActive
-                                                    ? "font-medium text-red-300"
-                                                    : isDone
-                                                        ? "text-green-400"
-                                                        : "text-gray-500"
+                                                ? "font-medium text-red-300"
+                                                : isDone
+                                                    ? "text-green-400"
+                                                    : "text-gray-500"
                                                 }`}
                                         >
                                             {s.text}

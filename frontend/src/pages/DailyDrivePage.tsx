@@ -206,15 +206,15 @@ export default function DailyDrivePage({ onLogout: _onLogout }: { onLogout: () =
                                                 key={show.id}
                                                 onClick={() => toggleShow(show.id)}
                                                 className={`flex w-full items-center gap-3 rounded-xl p-3 text-left transition-all ${isSelected
-                                                        ? "bg-orange-500/15 ring-1 ring-orange-500/30"
-                                                        : "bg-white/5 hover:bg-white/10"
+                                                    ? "bg-orange-500/15 ring-1 ring-orange-500/30"
+                                                    : "bg-white/5 hover:bg-white/10"
                                                     }`}
                                             >
                                                 {/* Checkbox */}
                                                 <div
                                                     className={`flex h-5 w-5 flex-shrink-0 items-center justify-center rounded transition-all ${isSelected
-                                                            ? "bg-orange-500 text-white"
-                                                            : "bg-white/10 ring-1 ring-white/20"
+                                                        ? "bg-orange-500 text-white"
+                                                        : "bg-white/10 ring-1 ring-white/20"
                                                         }`}
                                                 >
                                                     {isSelected && (
@@ -288,10 +288,10 @@ export default function DailyDrivePage({ onLogout: _onLogout }: { onLogout: () =
                                     <div
                                         key={i}
                                         className={`flex items-center gap-3 rounded-xl px-4 py-3 transition-all duration-500 ${isActive
-                                                ? "bg-orange-500/15 ring-1 ring-orange-500/30"
-                                                : isDone
-                                                    ? "bg-green-500/10 ring-1 ring-green-500/20"
-                                                    : "bg-white/5 opacity-40"
+                                            ? "bg-orange-500/15 ring-1 ring-orange-500/30"
+                                            : isDone
+                                                ? "bg-green-500/10 ring-1 ring-green-500/20"
+                                                : "bg-white/5 opacity-40"
                                             }`}
                                     >
                                         <span className="text-lg">
@@ -299,10 +299,10 @@ export default function DailyDrivePage({ onLogout: _onLogout }: { onLogout: () =
                                         </span>
                                         <span
                                             className={`text-sm ${isActive
-                                                    ? "font-medium text-orange-300"
-                                                    : isDone
-                                                        ? "text-green-400"
-                                                        : "text-gray-500"
+                                                ? "font-medium text-orange-300"
+                                                : isDone
+                                                    ? "text-green-400"
+                                                    : "text-gray-500"
                                                 }`}
                                         >
                                             {s.text}
