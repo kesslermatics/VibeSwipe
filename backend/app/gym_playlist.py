@@ -107,7 +107,7 @@ async def fetch_playlist_tracks(
                 if idx == 0:
                     print(f"[GYM DEBUG] First item keys: {list(item.keys()) if isinstance(item, dict) else type(item)}")
                     print(f"[GYM DEBUG] First item sample: {str(item)[:500]}")
-                track = item.get("track")
+                track = item.get("track") or item.get("item")
                 if not track:
                     if idx < 3:
                         print(f"[GYM DEBUG] Item {idx} has no 'track' key. Item: {str(item)[:300]}")
