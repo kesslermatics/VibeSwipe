@@ -214,7 +214,7 @@ Rules:
         text = data["candidates"][0]["content"]["parts"][0]["text"]
     except (KeyError, IndexError) as e:
         logger.error(f"Unexpected Gemini response structure: {json.dumps(data)[:500]}")
-        raise Exception(f"Unerwartete Gemini-Antwort: {e}")
+        raise Exception(f"Unexpected Gemini response: {e}")
 
     # Strip markdown code fences if present
     text = text.strip()
@@ -228,11 +228,11 @@ Rules:
         return json.loads(text)
     except json.JSONDecodeError as e:
         logger.error(f"Gemini returned invalid JSON: {text[:500]}")
-        raise Exception(f"Gemini hat ungültiges JSON zurückgegeben: {e}")
+        raise Exception(f"Gemini returned invalid JSON: {e}")
 
 
 async def robust_spotify_search(query: str, spotify_token: str, max_retries: int = 3) -> dict | None:
-    """Spotify-Search mit Retry-After und Logging bei 429."""
+    """Spotify search with retry-after handling and 429 logging."""
     headers = {"Authorization": f"Bearer {spotify_token}"}
     params = {"q": query, "type": "track", "limit": 1}
     for attempt in range(max_retries):
@@ -329,8 +329,8 @@ async def generate_daily_drive(
     logger.info(f"Daily Drive: Got {len(on_repeat)} On-Repeat tracks")
     if len(on_repeat) < 5:
         raise Exception(
-            "Du brauchst mindestens 5 Songs in deinen Top Tracks (On Repeat). "
-            "Hör mehr Musik und versuche es später nochmal!"
+            "You need at least 5 songs in your Top Tracks (On Repeat). "
+            "Listen to more music and try again later!"
         )
 
     # 2. Fetch podcast episodes EARLY (before Gemini) so the rate limit
@@ -479,10 +479,10 @@ async def generate_daily_drive(
     today = date.today().strftime("%d.%m.%Y")
     playlist_name = f"Daily Drive – {today}"
     playlist_desc = (
-        f"Dein persönlicher Daily Drive von VibeSwipe 🚗 "
+        f"Your personal Daily Drive by VibeSwipe 🚗 "
         f"{len(from_repeat_uris)} On-Repeat Songs, "
-        f"{len(new_discovery_uris)} neue Entdeckungen"
-        f"{f', {len(episode_uris)} Podcast-Folgen' if episode_uris else ''}"
+        f"{len(new_discovery_uris)} new discoveries"
+        f"{f', {len(episode_uris)} podcast episodes' if episode_uris else ''}"
     )
 
     auth_headers = {"Authorization": f"Bearer {spotify_token}"}
@@ -499,7 +499,7 @@ async def generate_daily_drive(
         )
 
         if create_resp.status_code not in (200, 201):
-            raise Exception(f"Playlist konnte nicht erstellt werden: {create_resp.text}")
+            raise Exception(f"Could not create playlist: {create_resp.text}")
 
         playlist = create_resp.json()
         playlist_id = playlist["id"]

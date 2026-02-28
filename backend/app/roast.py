@@ -140,9 +140,9 @@ async def ask_gemini_roast(
     artists_text = "\n".join(f"- {a}" for a in top_artists[:15])
     genres_text = ", ".join(top_genres[:10])
 
-    prompt = f"""Du bist ein sarkastischer, witziger Musik-Kritiker. Du sprichst Deutsch.
+    prompt = f"""You are a sarcastic, witty music critic.
 
-Hier sind die Daten eines Spotify-Nutzers:
+Here is a Spotify user's data:
 
 TOP SONGS:
 {tracks_text}
@@ -152,25 +152,25 @@ TOP ARTISTS:
 
 TOP GENRES: {genres_text}
 
-AUDIO-FEATURES (Durchschnittswerte, 0.0 bis 1.0 außer Tempo):
+AUDIO FEATURES (averages, 0.0 to 1.0 except tempo):
 {features_text}
 
-Deine Aufgabe:
-1. Erstelle einen kurzen, roasty Persona-Titel (z.B. "Sad-Girl-Indie Protagonist", "Gym-Bro Metal Enjoyer", "Mainstream-NPC mit Spotify-Wrapped-Trauma")
-2. Schreibe einen brutalen, aber lustigen Roast über den Musikgeschmack des Nutzers in genau 3 Sätzen. Sei kreativ, sarkastisch und spezifisch!
+Your task:
+1. Create a short, roasty persona title (e.g. "Sad-Girl-Indie Protagonist", "Gym-Bro Metal Enjoyer", "Mainstream NPC with Spotify-Wrapped Trauma")
+2. Write a brutal but funny roast about the user's music taste in exactly 3 sentences. Be creative, sarcastic and specific!
 
-Antworte NUR mit validem JSON:
+Respond ONLY with valid JSON:
 {{
-  "persona": "Dein kreativer Persona-Titel",
-  "roast": "Dein 3-Sätze Roast hier."
+  "persona": "Your creative persona title",
+  "roast": "Your 3-sentence roast here."
 }}
 
-Regeln:
-- NUR valides JSON, kein Markdown, keine Erklärung
-- Der Persona-Titel soll kurz und knackig sein (max 5 Wörter)
-- Der Roast soll genau 3 Sätze lang sein
-- Sei brutal ehrlich aber lustig, nicht beleidigend
-- Beziehe dich auf konkrete Artists, Genres oder Features"""
+Rules:
+- ONLY valid JSON, no markdown, no explanation
+- The persona title should be short and punchy (max 5 words)
+- The roast should be exactly 3 sentences long
+- Be brutally honest but funny, not offensive
+- Reference specific artists, genres or features"""
 
     payload = {
         "contents": [{"parts": [{"text": prompt}]}],
@@ -254,8 +254,8 @@ async def generate_vibe_roast(spotify_token: str) -> dict:
 
     if len(top_tracks_raw) < 5:
         raise Exception(
-            "Du brauchst mindestens 5 Top-Songs für einen Vibe Roast. "
-            "Hör mehr Musik und versuche es später nochmal!"
+            "You need at least 5 top songs for a Vibe Roast. "
+            "Listen to more music and try again later!"
         )
 
     logger.info(
@@ -287,7 +287,7 @@ async def generate_vibe_roast(spotify_token: str) -> dict:
 
     return {
         "persona": roast_result.get("persona", "Mystery Listener"),
-        "roast": roast_result.get("roast", "Konnte keinen Roast generieren."),
+        "roast": roast_result.get("roast", "Could not generate a roast."),
         "audio_features": avg_features,
         "top_genres": top_genres,
         "top_artists": top_artist_names[:10],

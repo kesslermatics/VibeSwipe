@@ -22,7 +22,7 @@ const tiles: Tile[] = [
         id: "discover",
         emoji: "🔮",
         title: "Discover",
-        description: "Beschreibe deine Stimmung und entdecke Songs per AI",
+        description: "Describe your mood and discover songs with AI",
         color: "from-green-500/20 to-emerald-500/10 hover:ring-green-500/40",
         route: "/discover",
     },
@@ -30,7 +30,7 @@ const tiles: Tile[] = [
         id: "daily-drive",
         emoji: "🚗",
         title: "Daily Drive",
-        description: "Dein persönlicher Mix aus On-Repeat Songs, neuen Entdeckungen & Podcasts",
+        description: "Your personal mix of on-repeat songs, new discoveries & podcasts",
         color: "from-orange-500/20 to-amber-500/10 hover:ring-orange-500/40",
         route: "/daily-drive",
     },
@@ -38,7 +38,7 @@ const tiles: Tile[] = [
         id: "swipe",
         emoji: "💿",
         title: "Swipe Deck",
-        description: "Swipe durch Song-Vorschläge — rechts speichern, links skippen",
+        description: "Swipe through song suggestions — right to save, left to skip",
         color: "from-purple-500/20 to-violet-500/10 hover:ring-purple-500/40",
         route: "/swipe-deck",
     },
@@ -46,7 +46,7 @@ const tiles: Tile[] = [
         id: "vibe-roast",
         emoji: "🔥",
         title: "Vibe Roast",
-        description: "AI analysiert deinen Musikgeschmack und roastet dich gnadenlos",
+        description: "AI analyzes your music taste and roasts you mercilessly",
         color: "from-orange-500/20 to-red-500/10 hover:ring-orange-500/40",
         route: "/vibe-roast",
     },
@@ -54,7 +54,7 @@ const tiles: Tile[] = [
         id: "playlists",
         emoji: "📋",
         title: "Playlists",
-        description: "Deine gespeicherten Playlists und Favoriten",
+        description: "Your saved playlists and favorites",
         color: "from-sky-500/20 to-blue-500/10 hover:ring-sky-500/40",
         route: "/",
     },
@@ -62,7 +62,7 @@ const tiles: Tile[] = [
         id: "gym-playlist",
         emoji: "🏋️‍♂️",
         title: "Gym Playlist",
-        description: "Erstelle eine motivierende Gym-Playlist aus deinen Playlists",
+        description: "Create a motivating gym playlist from your playlists",
         color: "from-pink-500/20 to-red-500/10 hover:ring-pink-500/40",
         route: "/gym-playlist",
     },
@@ -116,7 +116,6 @@ export default function HomePage({ onLogout }: { onLogout: () => void }) {
                 {/* Feature Tiles */}
                 <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                     {tiles.map((tile) => {
-                        // Gym Playlist ist jetzt verfügbar
                         const isAvailable = tile.id === "discover" || tile.id === "daily-drive" || tile.id === "gym-playlist" || tile.id === "swipe" || tile.id === "vibe-roast";
                         return (
                             <button
@@ -135,7 +134,7 @@ export default function HomePage({ onLogout }: { onLogout: () => void }) {
                                 </p>
                                 {!isAvailable && (
                                     <span className="absolute right-4 top-4 rounded-full bg-gray-800 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-gray-500">
-                                        Bald
+                                        Soon
                                     </span>
                                 )}
                                 {isAvailable && (

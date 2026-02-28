@@ -191,7 +191,7 @@ async def get_my_playlists(
             )
             if resp.status_code != 200:
                 logger.error(f"my-playlists failed: status={resp.status_code}, body={resp.text[:300]}")
-                raise HTTPException(status_code=resp.status_code, detail=f"Playlists konnten nicht geladen werden: {resp.text[:200]}")
+                raise HTTPException(status_code=resp.status_code, detail=f"Could not load playlists: {resp.text[:200]}")
 
             data = resp.json()
             for item in data.get("items", []):
@@ -233,7 +233,7 @@ async def get_playlist_tracks(
             resolved_id = resolved_id.split(":")[-1]
 
     if not resolved_id:
-        raise HTTPException(status_code=400, detail="playlist_id oder playlist_url ist erforderlich.")
+        raise HTTPException(status_code=400, detail="playlist_id or playlist_url is required.")
 
     songs: list[str] = []
     url = f"{SPOTIFY_API_BASE}/playlists/{resolved_id}/items"
@@ -262,7 +262,7 @@ async def get_playlist_tracks(
                 logger.error(f"playlist-tracks failed: status={resp.status_code}, body={error_body}")
                 raise HTTPException(
                     status_code=resp.status_code,
-                    detail=f"Spotify API Fehler ({resp.status_code}): {error_body}",
+                    detail=f"Spotify API error ({resp.status_code}): {error_body}",
                 )
 
             data = resp.json()
@@ -381,7 +381,7 @@ async def save_tracks(
                 headers=headers,
                 json={
                     "name": f"SpotiVibe Discover – {len(track_uris)} Songs",
-                    "description": "Erstellt mit SpotiVibe AI Discover",
+                    "description": "Created with SpotiVibe AI Discover",
                     "public": False,
                 },
             )
@@ -389,7 +389,7 @@ async def save_tracks(
         if create_resp.status_code not in (200, 201):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Konnte weder Liked Songs noch Playlist erstellen: {create_resp.text}",
+                detail=f"Could not save to Liked Songs or create playlist: {create_resp.text}",
             )
 
         playlist = create_resp.json()
@@ -456,7 +456,7 @@ async def generate_daily_drive_playlist(
         logger.error(f"Daily Drive generation failed: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Daily Drive Erstellung fehlgeschlagen: {str(e)}",
+            detail=f"Daily Drive creation failed: {str(e)}",
         )
 
 
@@ -478,7 +478,7 @@ async def gym_playlist_generate(
         logger.error(f"Gym playlist generation failed: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Gym Playlist Erstellung fehlgeschlagen: {str(e)}",
+            detail=f"Gym Playlist creation failed: {str(e)}",
         )
 
 
@@ -539,12 +539,12 @@ def gym_playlist_toggle_auto_refresh(
         db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Einstellung konnte nicht gespeichert werden: {str(e)}",
+            detail=f"Could not save setting: {str(e)}",
         )
 
     return {
         "auto_refresh": gym_settings.auto_refresh,
-        "message": "Auto-Refresh aktiviert" if payload.auto_refresh else "Auto-Refresh deaktiviert",
+        "message": "Auto-refresh enabled" if payload.auto_refresh else "Auto-refresh disabled",
     }
 
 
@@ -620,7 +620,7 @@ async def get_swipe_deck(
         if len(playlist_songs) < 3:
             raise HTTPException(
                 status_code=400,
-                detail="Die Playlist hat zu wenige Songs. Wähle eine mit mindestens 3 Tracks!",
+                detail="This playlist has too few songs. Choose one with at least 3 tracks!",
             )
 
         # ── 2. Load skip history from Redis ──
@@ -637,21 +637,21 @@ async def get_swipe_deck(
         # ── 3. Ask Gemini for 30 new recommendations ──
         songs_text = "\n".join(f"- {s}" for s in playlist_songs[:100])
 
-        prompt = f"""Du bist ein Musik-Empfehlungs-Experte. Hier ist eine Spotify-Playlist:
+        prompt = f"""You are a music recommendation expert. Here is a Spotify playlist:
 
 {songs_text}
 
-Analysiere den Stil, die Genres und die Stimmung dieser Playlist.
-Empfehle genau 30 NEUE Songs, die perfekt dazu passen würden.
+Analyze the style, genres and mood of this playlist.
+Recommend exactly 30 NEW songs that would be a perfect fit.
 
-Regeln:
-- KEINE der folgenden Songs empfehlen (bereits in Playlist oder übersprungen):
+Rules:
+- Do NOT recommend any of the following songs (already in playlist or skipped):
 {avoid_text}
-- Mische bekannte und weniger bekannte Tracks
-- Achte auf Genre, Stimmung, Energie und Sprache der Playlist
-- Nur valides JSON, kein Markdown, keine Erklärung
+- Mix well-known and lesser-known tracks
+- Pay attention to the playlist's genre, mood, energy and language
+- Only valid JSON, no markdown, no explanation
 
-Antworte NUR mit diesem JSON-Format:
+Respond ONLY with this JSON format:
 {{
   "songs": [
     {{"title": "Song Name", "artist": "Artist Name"}},
@@ -714,7 +714,7 @@ Antworte NUR mit diesem JSON-Format:
         if not gemini_songs:
             raise HTTPException(
                 status_code=500,
-                detail="AI konnte keine Empfehlungen generieren. Versuche es nochmal!",
+                detail="AI could not generate recommendations. Try again!",
             )
 
         # ── 4. Search Spotify for each song in parallel (like Discover) ──
@@ -773,7 +773,7 @@ Antworte NUR mit diesem JSON-Format:
         if not tracks:
             raise HTTPException(
                 status_code=404,
-                detail="Keine neuen Songs gefunden. Versuche eine andere Playlist!",
+                detail="No new songs found. Try a different playlist!",
             )
 
         random.shuffle(tracks)
@@ -785,7 +785,7 @@ Antworte NUR mit diesem JSON-Format:
         logger.error(f"Swipe Deck failed: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Swipe Deck konnte nicht geladen werden: {str(e)}",
+            detail=f"Swipe Deck could not be loaded: {str(e)}",
         )
 
 
@@ -813,7 +813,7 @@ async def save_to_playlist(
         logger.error(f"Save to playlist failed: {resp.status_code} {resp.text[:300]}")
         raise HTTPException(
             status_code=resp.status_code,
-            detail=f"Song konnte nicht zur Playlist hinzugefügt werden: {resp.text[:200]}",
+            detail=f"Could not add song to playlist: {resp.text[:200]}",
         )
 
     return {"saved": len(payload.track_ids), "already_saved": 0}
@@ -854,7 +854,7 @@ async def vibe_roast(
         logger.error(f"Vibe Roast failed: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Vibe Roast fehlgeschlagen: {str(e)}",
+            detail=f"Vibe Roast failed: {str(e)}",
         )
 
 

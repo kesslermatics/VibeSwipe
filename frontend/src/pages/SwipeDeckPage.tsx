@@ -35,7 +35,7 @@ export default function SwipeDeckPage({ onLogout: _onLogout }: { onLogout: () =>
     useEffect(() => {
         getUserPlaylists()
             .then((p) => setPlaylists(p as Playlist[]))
-            .catch((err) => setError(err instanceof Error ? err.message : "Playlists laden fehlgeschlagen"))
+            .catch((err) => setError(err instanceof Error ? err.message : "Failed to load playlists"))
             .finally(() => setPlaylistsLoading(false));
     }, []);
 
@@ -52,7 +52,7 @@ export default function SwipeDeckPage({ onLogout: _onLogout }: { onLogout: () =>
         try {
             const tracks = await getSwipeDeck(playlist.id);
             if (tracks.length === 0) {
-                setError("Keine passenden Songs mit Preview gefunden. Versuch eine andere Playlist!");
+                setError("No matching songs found. Try a different playlist!");
                 setPhase("pick-playlist");
                 return;
             }
@@ -60,7 +60,7 @@ export default function SwipeDeckPage({ onLogout: _onLogout }: { onLogout: () =>
             setCurrentIndex(0);
             setPhase("swiping");
         } catch (err) {
-            setError(err instanceof Error ? err.message : "Fehler beim Laden");
+            setError(err instanceof Error ? err.message : "Error loading deck");
             setPhase("pick-playlist");
         }
     }, []);
@@ -116,10 +116,10 @@ export default function SwipeDeckPage({ onLogout: _onLogout }: { onLogout: () =>
                         </h1>
                         <p className="text-sm text-gray-400">
                             {phase === "pick-playlist"
-                                ? "Wähle eine Playlist als Basis"
+                                ? "Choose a playlist as your base"
                                 : selectedPlaylist
-                                    ? `Basierend auf: ${selectedPlaylist.name}`
-                                    : "Swipe rechts zum Hinzufügen"
+                                    ? `Based on: ${selectedPlaylist.name}`
+                                    : "Swipe right to add"
                             }
                         </p>
                     </div>
@@ -145,19 +145,19 @@ export default function SwipeDeckPage({ onLogout: _onLogout }: { onLogout: () =>
                         <div className="mb-4 flex items-center gap-2">
                             <span className="text-2xl">💿</span>
                             <p className="text-sm text-gray-400">
-                                AI analysiert die Playlist und schlägt passende neue Songs vor.
-                                Rechts-Swipe fügt Songs direkt zur Playlist hinzu!
+                                AI analyzes the playlist and suggests matching new songs.
+                                Swipe right to add songs directly to the playlist!
                             </p>
                         </div>
 
                         {playlistsLoading ? (
                             <div className="flex flex-col items-center py-16">
                                 <div className="h-8 w-8 animate-spin rounded-full border-2 border-purple-500 border-t-transparent" />
-                                <p className="mt-3 text-sm text-gray-500">Lade Playlists...</p>
+                                <p className="mt-3 text-sm text-gray-500">Loading playlists...</p>
                             </div>
                         ) : playlists.length === 0 ? (
                             <p className="py-8 text-center text-sm text-gray-500">
-                                Keine Playlists gefunden. Erstelle zuerst eine Playlist auf Spotify!
+                                No playlists found. Create a playlist on Spotify first!
                             </p>
                         ) : (
                             <div className="space-y-2">
@@ -192,9 +192,9 @@ export default function SwipeDeckPage({ onLogout: _onLogout }: { onLogout: () =>
                 {phase === "loading" && (
                     <div className="flex flex-col items-center py-16">
                         <div className="mb-4 h-12 w-12 animate-spin rounded-full border-4 border-purple-500 border-t-transparent" />
-                        <p className="text-sm text-gray-400">AI analysiert die Playlist...</p>
+                        <p className="text-sm text-gray-400">AI is analyzing the playlist...</p>
                         <p className="mt-1 text-xs text-gray-600">
-                            Das kann 15–30 Sekunden dauern
+                            This may take 15–30 seconds
                         </p>
                     </div>
                 )}
@@ -270,21 +270,21 @@ export default function SwipeDeckPage({ onLogout: _onLogout }: { onLogout: () =>
                     <div className="flex flex-col items-center py-16">
                         <div className="mb-6 text-6xl">🎉</div>
                         <h2 className="mb-2 text-xl font-bold text-gray-100">
-                            Alle Songs durchgeswipt!
+                            All songs swiped!
                         </h2>
                         {selectedPlaylist && (
                             <p className="mb-4 text-sm text-gray-400">
-                                {savedCount} Songs zu <span className="font-semibold text-purple-400">{selectedPlaylist.name}</span> hinzugefügt
+                                {savedCount} songs added to <span className="font-semibold text-purple-400">{selectedPlaylist.name}</span>
                             </p>
                         )}
                         <div className="mb-6 flex gap-6 text-center">
                             <div className="rounded-xl bg-green-500/10 px-5 py-3 ring-1 ring-green-500/20">
                                 <p className="text-2xl font-bold text-green-400">{savedCount}</p>
-                                <p className="text-[10px] text-gray-400">Hinzugefügt</p>
+                                <p className="text-[10px] text-gray-400">Added</p>
                             </div>
                             <div className="rounded-xl bg-red-500/10 px-5 py-3 ring-1 ring-red-500/20">
                                 <p className="text-2xl font-bold text-red-400">{skippedCount}</p>
-                                <p className="text-[10px] text-gray-400">Geskippt</p>
+                                <p className="text-[10px] text-gray-400">Skipped</p>
                             </div>
                         </div>
                         <div className="flex gap-3">
@@ -292,13 +292,13 @@ export default function SwipeDeckPage({ onLogout: _onLogout }: { onLogout: () =>
                                 onClick={() => selectedPlaylist && loadDeck(selectedPlaylist)}
                                 className="rounded-2xl bg-gradient-to-r from-purple-500 to-violet-500 px-6 py-3 text-sm font-bold text-white shadow-lg shadow-purple-500/25 transition hover:brightness-110"
                             >
-                                🔄 Nochmal
+                                🔄 Again
                             </button>
                             <button
                                 onClick={() => { setPhase("pick-playlist"); setError(""); }}
                                 className="rounded-2xl px-6 py-3 text-sm font-bold text-gray-300 ring-1 ring-white/10 transition hover:ring-white/20"
                             >
-                                Andere Playlist
+                                Different Playlist
                             </button>
                         </div>
                     </div>
@@ -364,7 +364,7 @@ function SwipeCard({
         >
             <div className="h-full w-full overflow-hidden rounded-3xl bg-gray-900 shadow-2xl ring-1 ring-white/10">
                 {/* Album art */}
-                <div className="relative h-[260px] w-full overflow-hidden bg-gray-800">
+                <div className="relative h-[180px] w-full overflow-hidden bg-gray-800">
                     {track.album_image ? (
                         <img
                             src={track.album_image}
@@ -397,7 +397,7 @@ function SwipeCard({
                             key={`embed-${trackId}`}
                             src={`https://open.spotify.com/embed/track/${trackId}?utm_source=generator&theme=0`}
                             width="100%"
-                            height="80"
+                            height="152"
                             frameBorder="0"
                             allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
                             loading="lazy"

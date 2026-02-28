@@ -25,7 +25,7 @@ export default function RoastPage({ onLogout: _onLogout }: { onLogout: () => voi
             const data = await getRoast();
             setResult(data);
         } catch (err) {
-            setError(err instanceof Error ? err.message : "Fehler beim Generieren");
+            setError(err instanceof Error ? err.message : "Error generating roast");
         } finally {
             setLoading(false);
         }
@@ -50,7 +50,7 @@ export default function RoastPage({ onLogout: _onLogout }: { onLogout: () => voi
                             <span className="text-gray-100">Roast</span>
                         </h1>
                         <p className="text-sm text-gray-400">
-                            Dein AI-generiertes Musik-Profil
+                            Your AI-generated music profile
                         </p>
                     </div>
                 </div>
@@ -66,17 +66,17 @@ export default function RoastPage({ onLogout: _onLogout }: { onLogout: () => voi
                     <div className="flex flex-col items-center py-16">
                         <div className="mb-6 text-7xl">🔥</div>
                         <h2 className="mb-3 text-xl font-bold text-gray-100">
-                            Bereit für die Wahrheit?
+                            Ready for the truth?
                         </h2>
                         <p className="mb-8 max-w-xs text-center text-sm text-gray-400">
-                            Die AI analysiert deine Top-50 Songs &amp; Artists, berechnet dein
-                            Audio-Profil und serviert dir einen gnadenlosen Roast.
+                            AI analyzes your top 50 songs &amp; artists, calculates your
+                            audio profile and serves you a merciless roast.
                         </p>
                         <button
                             onClick={handleGenerate}
                             className="rounded-2xl bg-gradient-to-r from-orange-500 to-red-500 px-8 py-4 text-base font-bold text-white shadow-lg shadow-orange-500/25 transition hover:brightness-110"
                         >
-                            🔥 Roast mich!
+                            🔥 Roast me!
                         </button>
                     </div>
                 )}
@@ -86,10 +86,10 @@ export default function RoastPage({ onLogout: _onLogout }: { onLogout: () => voi
                     <div className="flex flex-col items-center py-16">
                         <div className="mb-4 h-12 w-12 animate-spin rounded-full border-4 border-orange-500 border-t-transparent" />
                         <p className="text-sm text-gray-400">
-                            AI analysiert dein Hörverhalten...
+                            AI is analyzing your listening habits...
                         </p>
                         <p className="mt-1 text-xs text-gray-600">
-                            Das kann 10–20 Sekunden dauern
+                            This may take 10–20 seconds
                         </p>
                     </div>
                 )}
@@ -100,7 +100,7 @@ export default function RoastPage({ onLogout: _onLogout }: { onLogout: () => voi
                         {/* Persona card */}
                         <div className="rounded-3xl bg-gradient-to-br from-orange-500/20 via-red-500/10 to-purple-500/20 p-6 ring-1 ring-white/10 shadow-2xl">
                             <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-orange-400/70">
-                                Dein Musik-Typ
+                                Your Music Type
                             </p>
                             <h2 className="mb-4 text-3xl font-black leading-tight text-gray-100">
                                 {result.persona}
@@ -204,7 +204,7 @@ export default function RoastPage({ onLogout: _onLogout }: { onLogout: () => voi
                                 <span className="text-lg font-bold text-gray-300">
                                     {result.track_count}
                                 </span>
-                                <p>Songs analysiert</p>
+                                <p>Songs analyzed</p>
                             </div>
                             <div className="rounded-xl bg-white/5 px-4 py-2 ring-1 ring-white/5">
                                 <span className="text-lg font-bold text-gray-300">
@@ -227,7 +227,7 @@ export default function RoastPage({ onLogout: _onLogout }: { onLogout: () => voi
                                 disabled={loading}
                                 className="rounded-2xl bg-gradient-to-r from-orange-500 to-red-500 px-6 py-3 text-sm font-bold text-white shadow-lg shadow-orange-500/25 transition hover:brightness-110 disabled:opacity-50"
                             >
-                                🔄 Nochmal roasten!
+                                🔄 Roast me again!
                             </button>
                         </div>
                     </div>

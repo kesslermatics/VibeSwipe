@@ -39,11 +39,11 @@ export default function DailyDrivePage({ onLogout: _onLogout }: { onLogout: () =
     const [generatingStep, setGeneratingStep] = useState(0);
 
     const generatingSteps = [
-        { emoji: "🎧", text: "Lade deine On-Repeat Songs..." },
-        { emoji: "🤖", text: "AI analysiert deinen Musikgeschmack..." },
-        { emoji: "🔍", text: "Suche passende neue Songs auf Spotify..." },
-        { emoji: "🎙️", text: "Wähle Podcast-Episoden aus..." },
-        { emoji: "🎶", text: "Erstelle deine Daily Drive Playlist..." },
+        { emoji: "🎧", text: "Loading your on-repeat songs..." },
+        { emoji: "🤖", text: "AI is analyzing your music taste..." },
+        { emoji: "🔍", text: "Searching for matching new songs on Spotify..." },
+        { emoji: "🎙️", text: "Selecting podcast episodes..." },
+        { emoji: "🎶", text: "Creating your Daily Drive playlist..." },
     ];
 
     // Auto-cycle through generating steps for visual feedback
@@ -64,7 +64,7 @@ export default function DailyDrivePage({ onLogout: _onLogout }: { onLogout: () =
         api<ShowsResult>("/daily-drive/shows", { method: "GET", token })
             .then((data) => setShows(data.shows))
             .catch((err) =>
-                setError(err instanceof Error ? err.message : "Podcasts konnten nicht geladen werden")
+                setError(err instanceof Error ? err.message : "Could not load podcasts")
             )
             .finally(() => setLoadingShows(false));
     }, [token]);
@@ -95,7 +95,7 @@ export default function DailyDrivePage({ onLogout: _onLogout }: { onLogout: () =
             setResult(data);
             setStep("done");
         } catch (err: unknown) {
-            setError(err instanceof Error ? err.message : "Etwas ist schiefgelaufen");
+            setError(err instanceof Error ? err.message : "Something went wrong");
             setStep("select");
         }
     };
@@ -126,7 +126,7 @@ export default function DailyDrivePage({ onLogout: _onLogout }: { onLogout: () =
                             <span className="text-gray-100">Drive</span>
                         </h1>
                         <p className="text-sm text-gray-400">
-                            Dein persönlicher Mix aus Musik & Podcasts
+                            Your personal mix of music & podcasts
                         </p>
                     </div>
                     <span className="text-3xl">🚗</span>
@@ -145,24 +145,24 @@ export default function DailyDrivePage({ onLogout: _onLogout }: { onLogout: () =
                         {/* Info card */}
                         <div className="mb-6 rounded-2xl bg-gradient-to-br from-orange-500/10 to-amber-500/5 p-5 ring-1 ring-orange-500/20">
                             <h2 className="mb-2 text-sm font-semibold text-orange-400">
-                                So funktioniert's
+                                How it works
                             </h2>
                             <ul className="space-y-1.5 text-xs text-gray-400">
                                 <li className="flex items-start gap-2">
                                     <span className="mt-0.5 text-orange-400">🎵</span>
-                                    Deine On-Repeat Songs werden analysiert
+                                    Your on-repeat songs are analyzed
                                 </li>
                                 <li className="flex items-start gap-2">
                                     <span className="mt-0.5 text-orange-400">🤖</span>
-                                    AI wählt 20 deiner Favorites + 20 neue Entdeckungen
+                                    AI picks 20 of your favorites + 20 new discoveries
                                 </li>
                                 <li className="flex items-start gap-2">
                                     <span className="mt-0.5 text-orange-400">🎙️</span>
-                                    Podcasts werden dazwischen gemischt (4 Songs → 1 Episode)
+                                    Podcasts are mixed in between (4 songs → 1 episode)
                                 </li>
                                 <li className="flex items-start gap-2">
                                     <span className="mt-0.5 text-orange-400">💾</span>
-                                    Fertige Playlist wird in deinem Spotify gespeichert
+                                    Finished playlist is saved to your Spotify
                                 </li>
                             </ul>
                         </div>
@@ -170,7 +170,7 @@ export default function DailyDrivePage({ onLogout: _onLogout }: { onLogout: () =
                         {/* Podcast selection */}
                         <div className="mb-6">
                             <h3 className="mb-3 text-sm font-semibold text-gray-300">
-                                🎙️ Podcasts auswählen{" "}
+                                🎙️ Select Podcasts{" "}
                                 <span className="font-normal text-gray-500">(optional)</span>
                             </h3>
 
@@ -190,11 +190,11 @@ export default function DailyDrivePage({ onLogout: _onLogout }: { onLogout: () =
                                 <div className="rounded-xl bg-white/5 p-6 text-center">
                                     <span className="mb-2 block text-3xl">🎙️</span>
                                     <p className="text-sm text-gray-400">
-                                        Du hast noch keine Podcasts gespeichert.
+                                        You don't have any saved podcasts yet.
                                     </p>
                                     <p className="mt-1 text-xs text-gray-500">
-                                        Folge Podcasts auf Spotify, damit sie hier erscheinen.
-                                        Du kannst auch ohne Podcasts eine Daily Drive erstellen!
+                                        Follow podcasts on Spotify so they show up here.
+                                        You can also create a Daily Drive without podcasts!
                                     </p>
                                 </div>
                             ) : (
@@ -246,7 +246,7 @@ export default function DailyDrivePage({ onLogout: _onLogout }: { onLogout: () =
                                                     </p>
                                                     <p className="truncate text-xs text-gray-500">
                                                         {show.publisher}
-                                                        {show.total_episodes > 0 && ` · ${show.total_episodes} Folgen`}
+                                                        {show.total_episodes > 0 && ` · ${show.total_episodes} episodes`}
                                                     </p>
                                                 </div>
                                             </button>
@@ -257,7 +257,7 @@ export default function DailyDrivePage({ onLogout: _onLogout }: { onLogout: () =
 
                             {selectedShowIds.size > 0 && (
                                 <p className="mt-2 text-xs text-orange-400/70">
-                                    {selectedShowIds.size} Podcast{selectedShowIds.size > 1 ? "s" : ""} ausgewählt
+                                    {selectedShowIds.size} podcast{selectedShowIds.size > 1 ? "s" : ""} selected
                                 </p>
                             )}
                         </div>
@@ -268,7 +268,7 @@ export default function DailyDrivePage({ onLogout: _onLogout }: { onLogout: () =
                             className="flex w-full items-center justify-center gap-3 rounded-2xl bg-gradient-to-r from-orange-500 to-amber-500 px-6 py-4 text-base font-bold text-white shadow-lg shadow-orange-500/25 transition hover:shadow-orange-500/40 hover:brightness-110"
                         >
                             <span className="text-xl">🚗</span>
-                            Daily Drive generieren
+                            Generate Daily Drive
                         </button>
                     </>
                 )}
@@ -316,7 +316,7 @@ export default function DailyDrivePage({ onLogout: _onLogout }: { onLogout: () =
                         </div>
 
                         <p className="mt-8 text-xs text-gray-500">
-                            Das kann bis zu 30 Sekunden dauern…
+                            This may take up to 30 seconds…
                         </p>
                     </div>
                 )}
@@ -328,7 +328,7 @@ export default function DailyDrivePage({ onLogout: _onLogout }: { onLogout: () =
                         <div className="mb-6 text-6xl">🎉</div>
 
                         <h2 className="mb-2 text-xl font-bold text-gray-100">
-                            Deine Daily Drive ist fertig!
+                            Your Daily Drive is ready!
                         </h2>
                         <p className="mb-8 text-center text-sm text-gray-400">
                             {result.playlist_name}
@@ -346,7 +346,7 @@ export default function DailyDrivePage({ onLogout: _onLogout }: { onLogout: () =
                                 <p className="text-2xl font-bold text-purple-400">
                                     {result.new_discoveries_count}
                                 </p>
-                                <p className="mt-1 text-[10px] text-gray-400">Neue Songs</p>
+                                <p className="mt-1 text-[10px] text-gray-400">New Songs</p>
                             </div>
                             <div className="rounded-xl bg-orange-500/10 p-4 text-center ring-1 ring-orange-500/20">
                                 <p className="text-2xl font-bold text-orange-400">
@@ -380,13 +380,13 @@ export default function DailyDrivePage({ onLogout: _onLogout }: { onLogout: () =
                                 <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
                                     <path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z" />
                                 </svg>
-                                In Spotify öffnen
+                                Open in Spotify
                             </a>
                             <button
                                 onClick={handleReset}
                                 className="flex items-center justify-center gap-2 rounded-2xl px-6 py-3.5 text-sm font-medium text-gray-400 ring-1 ring-white/10 transition hover:text-white hover:ring-white/20"
                             >
-                                🔄 Neue Daily Drive erstellen
+                                🔄 Create new Daily Drive
                             </button>
                         </div>
                     </div>

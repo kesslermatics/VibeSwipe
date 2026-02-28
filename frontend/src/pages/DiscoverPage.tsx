@@ -107,7 +107,7 @@ export default function DiscoverPage({ onLogout: _onLogout }: { onLogout: () => 
             });
             setPlaylists(data.playlists);
         } catch (err: unknown) {
-            setError(err instanceof Error ? err.message : "Playlists konnten nicht geladen werden");
+            setError(err instanceof Error ? err.message : "Could not load playlists");
         } finally {
             setLoadingPlaylists(false);
         }
@@ -126,7 +126,7 @@ export default function DiscoverPage({ onLogout: _onLogout }: { onLogout: () => 
             setContextSongs(data.songs);
         } catch (err: unknown) {
             const msg = err instanceof Error ? err.message : "";
-            setError(msg || "Playlist-Songs konnten nicht geladen werden");
+            setError(msg || "Could not load playlist songs");
             setSelectedPlaylist(null);
         } finally {
             setLoadingPlaylistTracks(false);
@@ -160,7 +160,7 @@ export default function DiscoverPage({ onLogout: _onLogout }: { onLogout: () => 
             });
             setResult(data);
         } catch (err: unknown) {
-            setError(err instanceof Error ? err.message : "Etwas ist schiefgelaufen");
+            setError(err instanceof Error ? err.message : "Something went wrong");
         } finally {
             setLoading(false);
         }
@@ -188,7 +188,7 @@ export default function DiscoverPage({ onLogout: _onLogout }: { onLogout: () => 
             result.songs.forEach((_, i) => allIdx.add(i));
             setSavedSongs(allIdx);
         } catch (err: unknown) {
-            setError(err instanceof Error ? err.message : "Songs konnten nicht gespeichert werden");
+            setError(err instanceof Error ? err.message : "Could not save songs");
         } finally {
             setSavingAll(false);
         }
@@ -211,7 +211,7 @@ export default function DiscoverPage({ onLogout: _onLogout }: { onLogout: () => 
                         <h1 className="text-2xl font-bold tracking-tight">
                             <span className="text-green-400">Discover</span>
                         </h1>
-                        <p className="text-sm text-gray-400">Beschreibe deine Stimmung oder was du hören willst</p>
+                        <p className="text-sm text-gray-400">Describe your mood or what you want to hear</p>
                     </div>
 
                     {/* Global volume control */}
@@ -219,7 +219,7 @@ export default function DiscoverPage({ onLogout: _onLogout }: { onLogout: () => 
                         <button
                             onClick={() => setShowVolume(!showVolume)}
                             className="rounded-lg p-2 text-gray-400 ring-1 ring-white/10 transition hover:text-white hover:ring-white/20"
-                            title="Lautstärke"
+                            title="Volume"
                         >
                             {volume === 0 ? (
                                 <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -281,8 +281,8 @@ export default function DiscoverPage({ onLogout: _onLogout }: { onLogout: () => 
                             onChange={(e) => setPrompt(e.target.value)}
                             placeholder={
                                 selectedPlaylist
-                                    ? `„${selectedPlaylist.name}" als Inspiration geladen (${contextSongs.length} Songs)! Beschreibe, was du entdecken willst…`
-                                    : 'z.B. "Chill Lo-Fi zum Lernen", "Party Songs wie bei Tomorrowland", "Melancholische Indie Songs für einen Regentag"...'
+                                    ? `"${selectedPlaylist.name}" loaded as inspiration (${contextSongs.length} songs)! Describe what you want to discover…`
+                                    : 'e.g. "Chill Lo-Fi for studying", "Party songs like at Tomorrowland", "Melancholic indie songs for a rainy day"...'
                             }
                             rows={3}
                             className="w-full resize-none bg-transparent text-sm text-gray-100 placeholder-gray-500 outline-none"
@@ -300,7 +300,7 @@ export default function DiscoverPage({ onLogout: _onLogout }: { onLogout: () => 
                                     <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                         <path strokeLinecap="round" strokeLinejoin="round" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
                                     </svg>
-                                    Playlist als Inspiration hinzufügen
+                                    Add playlist as inspiration
                                 </button>
                             )}
 
@@ -308,7 +308,7 @@ export default function DiscoverPage({ onLogout: _onLogout }: { onLogout: () => 
                             {showPlaylistPicker && !selectedPlaylist && (
                                 <div>
                                     <div className="mb-2 flex items-center justify-between">
-                                        <p className="text-xs font-medium text-gray-400">Wähle eine Playlist:</p>
+                                        <p className="text-xs font-medium text-gray-400">Choose a playlist:</p>
                                         <button
                                             type="button"
                                             onClick={() => setShowPlaylistPicker(false)}
@@ -346,7 +346,7 @@ export default function DiscoverPage({ onLogout: _onLogout }: { onLogout: () => 
                                                 </button>
                                             ))}
                                             {playlists.length === 0 && !loadingPlaylists && (
-                                                <p className="py-4 text-center text-xs text-gray-500">Keine Playlists gefunden</p>
+                                                <p className="py-4 text-center text-xs text-gray-500">No playlists found</p>
                                             )}
                                         </div>
                                     )}
@@ -378,7 +378,7 @@ export default function DiscoverPage({ onLogout: _onLogout }: { onLogout: () => 
                                         onClick={clearPlaylistContext}
                                         className="text-xs text-gray-500 transition hover:text-red-400"
                                     >
-                                        Entfernen
+                                        Remove
                                     </button>
                                 </div>
                             )}
@@ -394,14 +394,14 @@ export default function DiscoverPage({ onLogout: _onLogout }: { onLogout: () => 
                                 {loading ? (
                                     <>
                                         <div className="h-4 w-4 animate-spin rounded-full border-2 border-gray-950 border-t-transparent" />
-                                        Suche…
+                                        Searching…
                                     </>
                                 ) : (
                                     <>
                                         <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                             <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                                         </svg>
-                                        Entdecken
+                                        Discover
                                     </>
                                 )}
                             </button>
@@ -423,11 +423,11 @@ export default function DiscoverPage({ onLogout: _onLogout }: { onLogout: () => 
                             <span className="text-2xl">💚</span>
                             <div>
                                 <p className="text-sm font-semibold text-green-400">
-                                    {saveAllResult.saved} neue Songs in deinen Lieblingssongs gespeichert!
+                                    {saveAllResult.saved} new songs saved to your liked songs!
                                 </p>
                                 {saveAllResult.already_saved > 0 && (
                                     <p className="text-xs text-gray-400">
-                                        {saveAllResult.already_saved} waren schon drin
+                                        {saveAllResult.already_saved} were already saved
                                     </p>
                                 )}
                             </div>
@@ -483,7 +483,7 @@ export default function DiscoverPage({ onLogout: _onLogout }: { onLogout: () => 
                                                     <p className="truncate text-sm font-semibold text-gray-100">{song.title}</p>
                                                     <p className="truncate text-xs text-gray-400">{song.artist}</p>
                                                 </div>
-                                                <span className="text-xs text-gray-600">Nicht auf Spotify</span>
+                                                <span className="text-xs text-gray-600">Not on Spotify</span>
                                             </div>
                                         )}
                                     </div>
@@ -514,7 +514,7 @@ export default function DiscoverPage({ onLogout: _onLogout }: { onLogout: () => 
                     <div className="fixed inset-x-0 bottom-0 z-50 border-t border-white/5 bg-gray-950/90 px-4 py-3 backdrop-blur-xl">
                         <div className="mx-auto flex max-w-2xl items-center justify-between">
                             <p className="text-sm text-gray-300">
-                                <span className="font-bold text-green-400">{result.songs.filter((s) => s.spotify_uri).length}</span> Songs gefunden
+                                <span className="font-bold text-green-400">{result.songs.filter((s) => s.spotify_uri).length}</span> songs found
                             </p>
                             <button
                                 onClick={saveAllSongs}
@@ -524,10 +524,10 @@ export default function DiscoverPage({ onLogout: _onLogout }: { onLogout: () => 
                                 {savingAll ? (
                                     <>
                                         <div className="h-4 w-4 animate-spin rounded-full border-2 border-gray-950 border-t-transparent" />
-                                        Speichere…
+                                        Saving…
                                     </>
                                 ) : (
-                                    "💚 Alle in Lieblingssongs"
+                                    "💚 Save all to Liked Songs"
                                 )}
                             </button>
                         </div>

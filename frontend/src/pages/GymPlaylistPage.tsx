@@ -45,11 +45,11 @@ export default function GymPlaylistPage({ onLogout: _onLogout }: { onLogout: () 
     const [generatingStep, setGeneratingStep] = useState(0);
 
     const generatingSteps = [
-        { emoji: "🎵", text: "Lade Songs aus deinen Playlists..." },
-        { emoji: "🤖", text: "AI erstellt deinen Gym-Mix..." },
-        { emoji: "🔍", text: "Suche Songs auf Spotify..." },
-        { emoji: "🗑️", text: "Lösche alte Gym Playlist..." },
-        { emoji: "🏋️", text: "Erstelle deine neue Gym Playlist..." },
+        { emoji: "🎵", text: "Loading songs from your playlists..." },
+        { emoji: "🤖", text: "AI is creating your gym mix..." },
+        { emoji: "🔍", text: "Searching songs on Spotify..." },
+        { emoji: "🗑️", text: "Deleting old gym playlist..." },
+        { emoji: "🏋️", text: "Creating your new gym playlist..." },
     ];
 
     // Auto-cycle through generating steps
@@ -82,7 +82,7 @@ export default function GymPlaylistPage({ onLogout: _onLogout }: { onLogout: () 
                 }
             })
             .catch((err) =>
-                setError(err instanceof Error ? err.message : "Playlists konnten nicht geladen werden")
+                setError(err instanceof Error ? err.message : "Could not load playlists")
             )
             .finally(() => setLoadingPlaylists(false));
     }, [token]);
@@ -125,7 +125,7 @@ export default function GymPlaylistPage({ onLogout: _onLogout }: { onLogout: () 
             setAutoRefresh(data.auto_refresh);
             setStep("done");
         } catch (err: unknown) {
-            setError(err instanceof Error ? err.message : "Etwas ist schiefgelaufen");
+            setError(err instanceof Error ? err.message : "Something went wrong");
             setStep("select");
         }
     };
@@ -155,7 +155,7 @@ export default function GymPlaylistPage({ onLogout: _onLogout }: { onLogout: () 
                             <span className="text-gray-100">Playlist</span>
                         </h1>
                         <p className="text-sm text-gray-400">
-                            Dein persönlicher Workout-Mix mit AI-Power
+                            Your personal workout mix with AI power
                         </p>
                     </div>
                     <span className="text-3xl">🏋️</span>
@@ -174,24 +174,24 @@ export default function GymPlaylistPage({ onLogout: _onLogout }: { onLogout: () 
                         {/* Info card */}
                         <div className="mb-6 rounded-2xl bg-gradient-to-br from-red-500/10 to-orange-500/5 p-5 ring-1 ring-red-500/20">
                             <h2 className="mb-2 text-sm font-semibold text-red-400">
-                                So funktioniert's
+                                How it works
                             </h2>
                             <ul className="space-y-1.5 text-xs text-gray-400">
                                 <li className="flex items-start gap-2">
                                     <span className="mt-0.5 text-red-400">🎵</span>
-                                    Wähle Playlists als Inspiration für deinen Musikgeschmack
+                                    Choose playlists as inspiration for your music taste
                                 </li>
                                 <li className="flex items-start gap-2">
                                     <span className="mt-0.5 text-red-400">🤖</span>
-                                    AI erstellt 30 high-energy Gym-Tracks passend zu deinem Style
+                                    AI creates 30 high-energy gym tracks matching your style
                                 </li>
                                 <li className="flex items-start gap-2">
                                     <span className="mt-0.5 text-red-400">🔄</span>
-                                    Alte Gym Playlist wird automatisch gelöscht & ersetzt
+                                    Old gym playlist is automatically deleted & replaced
                                 </li>
                                 <li className="flex items-start gap-2">
                                     <span className="mt-0.5 text-red-400">⏰</span>
-                                    Optional: Jeden Tag um 3 Uhr morgens automatisch neu generieren
+                                    Optional: Auto-regenerate daily at 3 AM
                                 </li>
                             </ul>
                         </div>
@@ -199,7 +199,7 @@ export default function GymPlaylistPage({ onLogout: _onLogout }: { onLogout: () 
                         {/* Playlist selection */}
                         <div className="mb-6">
                             <h3 className="mb-3 text-sm font-semibold text-gray-300">
-                                🎵 Playlists als Inspiration wählen
+                                🎵 Choose playlists as inspiration
                             </h3>
 
                             {loadingPlaylists ? (
@@ -218,10 +218,10 @@ export default function GymPlaylistPage({ onLogout: _onLogout }: { onLogout: () 
                                 <div className="rounded-xl bg-white/5 p-6 text-center">
                                     <span className="mb-2 block text-3xl">🎵</span>
                                     <p className="text-sm text-gray-400">
-                                        Keine Playlists gefunden.
+                                        No playlists found.
                                     </p>
                                     <p className="mt-1 text-xs text-gray-500">
-                                        Erstelle Playlists auf Spotify, damit sie hier erscheinen.
+                                        Create playlists on Spotify so they show up here.
                                     </p>
                                 </div>
                             ) : (
@@ -284,7 +284,7 @@ export default function GymPlaylistPage({ onLogout: _onLogout }: { onLogout: () 
 
                             {selectedIds.size > 0 && (
                                 <p className="mt-2 text-xs text-red-400/70">
-                                    {selectedIds.size} Playlist{selectedIds.size > 1 ? "s" : ""} ausgewählt
+                                    {selectedIds.size} playlist{selectedIds.size > 1 ? "s" : ""} selected
                                 </p>
                             )}
                         </div>
@@ -311,11 +311,11 @@ export default function GymPlaylistPage({ onLogout: _onLogout }: { onLogout: () 
 
                                 <div className="flex-1">
                                     <p className="text-sm font-medium text-gray-200">
-                                        ⏰ Tägliche Auto-Erneuerung
+                                        ⏰ Daily Auto-Refresh
                                     </p>
                                     <p className="text-xs text-gray-500">
-                                        Jeden Tag um 3:00 Uhr morgens wird deine Gym Playlist
-                                        automatisch neu erstellt mit frischen Songs
+                                        Every day at 3:00 AM your gym playlist
+                                        is automatically recreated with fresh songs
                                     </p>
                                 </div>
                             </button>
@@ -331,7 +331,7 @@ export default function GymPlaylistPage({ onLogout: _onLogout }: { onLogout: () 
                                 }`}
                         >
                             <span className="text-xl">🏋️</span>
-                            Gym Playlist generieren
+                            Generate Gym Playlist
                         </button>
                     </>
                 )}
@@ -377,7 +377,7 @@ export default function GymPlaylistPage({ onLogout: _onLogout }: { onLogout: () 
                         </div>
 
                         <p className="mt-8 text-xs text-gray-500">
-                            Das kann bis zu 60 Sekunden dauern…
+                            This may take up to 60 seconds…
                         </p>
                     </div>
                 )}
@@ -388,7 +388,7 @@ export default function GymPlaylistPage({ onLogout: _onLogout }: { onLogout: () 
                         <div className="mb-6 text-6xl">🎉</div>
 
                         <h2 className="mb-2 text-xl font-bold text-gray-100">
-                            Deine Gym Playlist ist fertig!
+                            Your Gym Playlist is ready!
                         </h2>
                         <p className="mb-8 text-center text-sm text-gray-400">
                             {result.playlist_name}
@@ -406,7 +406,7 @@ export default function GymPlaylistPage({ onLogout: _onLogout }: { onLogout: () 
                                 <p className="text-2xl font-bold text-orange-400">
                                     {result.inspiration_count}
                                 </p>
-                                <p className="mt-1 text-[10px] text-gray-400">Inspirationen</p>
+                                <p className="mt-1 text-[10px] text-gray-400">Inspirations</p>
                             </div>
                         </div>
 
@@ -427,11 +427,11 @@ export default function GymPlaylistPage({ onLogout: _onLogout }: { onLogout: () 
                         {autoRefresh && (
                             <div className="mb-6 w-full max-w-sm rounded-xl bg-red-500/10 p-4 text-center ring-1 ring-red-500/20">
                                 <p className="text-sm text-red-300">
-                                    ⏰ Auto-Erneuerung ist aktiv
+                                    ⏰ Auto-refresh is active
                                 </p>
                                 <p className="mt-1 text-xs text-gray-500">
-                                    Morgen um 3:00 Uhr wird diese Playlist gelöscht und eine
-                                    frische Gym Playlist erstellt.
+                                    Tomorrow at 3:00 AM this playlist will be deleted and a
+                                    fresh gym playlist will be created.
                                 </p>
                             </div>
                         )}
@@ -447,13 +447,13 @@ export default function GymPlaylistPage({ onLogout: _onLogout }: { onLogout: () 
                                 <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
                                     <path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z" />
                                 </svg>
-                                In Spotify öffnen
+                                Open in Spotify
                             </a>
                             <button
                                 onClick={handleReset}
                                 className="flex items-center justify-center gap-2 rounded-2xl px-6 py-3.5 text-sm font-medium text-gray-400 ring-1 ring-white/10 transition hover:text-white hover:ring-white/20"
                             >
-                                🔄 Neue Gym Playlist erstellen
+                                🔄 Create new Gym Playlist
                             </button>
                         </div>
                     </div>

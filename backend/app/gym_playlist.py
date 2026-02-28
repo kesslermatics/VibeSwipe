@@ -132,7 +132,7 @@ async def fetch_playlist_tracks(
                     f"UNEXPECTED status {resp.status_code}: {resp.text[:500]}"
                 )
                 raise Exception(
-                    f"Spotify Fehler beim Laden der Playlist {playlist_id}: "
+                    f"Spotify error loading playlist {playlist_id}: "
                     f"HTTP {resp.status_code}"
                 )
 
@@ -395,9 +395,9 @@ async def generate_gym_playlist(
 
     if len(all_tracks) < 5:
         raise Exception(
-            "Zu wenige Songs in den ausgewählten Playlists. "
-            "Einige Playlists konnten nicht geladen werden (z.B. Spotify-generierte wie 'Discover Weekly'). "
-            "Wähle andere Playlists mit mehr eigenen Songs aus!"
+            "Too few songs in the selected playlists. "
+            "Some playlists could not be loaded (e.g. Spotify-generated ones like 'Discover Weekly'). "
+            "Choose other playlists with more of your own songs!"
         )
 
     logger.info(f"Gym Playlist: Got {len(all_tracks)} total tracks")
@@ -435,7 +435,7 @@ async def generate_gym_playlist(
 
     if len(uris) < 10:
         raise Exception(
-            "Zu wenige Songs auf Spotify gefunden. Bitte versuche es erneut!"
+            "Too few songs found on Spotify. Please try again!"
         )
 
     # 5. Delete old gym playlist if it exists
@@ -461,8 +461,8 @@ async def generate_gym_playlist(
     today = date.today().strftime("%d.%m.%Y")
     playlist_name = f"🏋️ VibeSwipe Gym Mix – {today}"
     playlist_desc = (
-        f"Dein persönlicher Gym Power Mix von VibeSwipe 💪 "
-        f"{len(uris)} motivierende Tracks"
+        f"Your personal Gym Power Mix by VibeSwipe 💪 "
+        f"{len(uris)} motivating tracks"
     )
 
     # Refresh token before playlist operations (may have gone stale during searches)
@@ -486,7 +486,7 @@ async def generate_gym_playlist(
             f"Gym Playlist: Playlist creation failed: {create_resp.status_code} {create_resp.text[:500]}"
         )
         raise Exception(
-            f"Playlist konnte nicht erstellt werden: HTTP {create_resp.status_code} – {create_resp.text[:300]}"
+            f"Could not create playlist: HTTP {create_resp.status_code} – {create_resp.text[:300]}"
         )
 
     playlist = create_resp.json()
