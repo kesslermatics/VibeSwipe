@@ -450,7 +450,7 @@ async def generate_gym_playlist(
         chunk = uris[i : i + 100]
         async with httpx.AsyncClient() as client:
             add_resp = await client.post(
-                f"{SPOTIFY_API}/playlists/{playlist_id}/tracks",
+                f"{SPOTIFY_API}/playlists/{playlist_id}/items",
                 headers=auth_headers,
                 json={"uris": chunk},
             )
@@ -459,23 +459,7 @@ async def generate_gym_playlist(
                 f"[GYM DEBUG] Failed to add tracks chunk {i}: "
                 f"status={add_resp.status_code} body={add_resp.text[:500]}"
             )
-            # Try once more with a fresh token
-            spotify_token = await get_valid_spotify_token(current_user, db)
-            auth_headers = {"Authorization": f"Bearer {spotify_token}"}
-            async with httpx.AsyncClient() as client2:
-                retry_resp = await client2.post(
-                    f"{SPOTIFY_API}/playlists/{playlist_id}/tracks",
-                    headers=auth_headers,
-                    json={"uris": chunk},
-                )
-            if retry_resp.status_code not in (200, 201):
-                print(
-                    f"[GYM DEBUG] Retry also failed: status={retry_resp.status_code} "
-                    f"body={retry_resp.text[:500]}"
-                )
-                logger.error(f"Failed to add tracks chunk {i} even after retry: {retry_resp.status_code}")
-            else:
-                print(f"[GYM DEBUG] Retry succeeded for chunk {i}")
+            logger.error(f"Failed to add tracks chunk {i}: {add_resp.status_code}")
         else:
             print(f"[GYM DEBUG] Added chunk {i} ({len(chunk)} tracks) to playlist")
 
