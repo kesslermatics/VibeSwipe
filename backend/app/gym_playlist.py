@@ -55,7 +55,12 @@ async def fetch_playlist_tracks(
     Returns (tracks, possibly_refreshed_token)."""
     tracks: list[dict] = []
     url = f"{SPOTIFY_API}/playlists/{playlist_id}/tracks"
-    params: dict | None = {"limit": 100}
+    params: dict | None = {
+        "limit": 100,
+        "market": "from_token",
+        "additional_types": "track",
+        "fields": "next,items(track(name,uri,artists(name)))",
+    }
     headers = {"Authorization": f"Bearer {spotify_token}"}
     current_token = spotify_token
 
@@ -70,7 +75,8 @@ async def fetch_playlist_tracks(
             if resp.status_code in (401, 403) and user and db:
                 logger.warning(
                     f"fetch_playlist_tracks({playlist_id}): got {resp.status_code}, "
-                    f"refreshing token..."
+                    f"refreshing token... "
+                    f"Headers: {dict(resp.headers)}"
                 )
                 try:
                     current_token = await refresh_spotify_token(user, db)
