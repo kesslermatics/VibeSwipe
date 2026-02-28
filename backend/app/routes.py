@@ -487,21 +487,26 @@ def gym_playlist_get_settings(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    settings = (
-        db.query(GymPlaylistSettings)
-        .filter(GymPlaylistSettings.user_id == current_user.id)
-        .first()
-    )
-    if not settings:
+    try:
+        gym_settings = (
+            db.query(GymPlaylistSettings)
+            .filter(GymPlaylistSettings.user_id == current_user.id)
+            .first()
+        )
+    except Exception as e:
+        logger.warning(f"Could not query GymPlaylistSettings: {e}")
+        gym_settings = None
+
+    if not gym_settings:
         return {
             "auto_refresh": False,
             "source_playlist_ids": [],
             "last_spotify_playlist_id": None,
         }
     return {
-        "auto_refresh": settings.auto_refresh,
-        "source_playlist_ids": json.loads(settings.source_playlist_ids or "[]"),
-        "last_spotify_playlist_id": settings.last_spotify_playlist_id,
+        "auto_refresh": gym_settings.auto_refresh,
+        "source_playlist_ids": json.loads(gym_settings.source_playlist_ids or "[]"),
+        "last_spotify_playlist_id": gym_settings.last_spotify_playlist_id,
     }
 
 
@@ -512,24 +517,32 @@ def gym_playlist_toggle_auto_refresh(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    settings = (
-        db.query(GymPlaylistSettings)
-        .filter(GymPlaylistSettings.user_id == current_user.id)
-        .first()
-    )
-    if not settings:
-        settings = GymPlaylistSettings(
-            user_id=current_user.id,
-            auto_refresh=payload.auto_refresh,
-            source_playlist_ids="[]",
+    try:
+        gym_settings = (
+            db.query(GymPlaylistSettings)
+            .filter(GymPlaylistSettings.user_id == current_user.id)
+            .first()
         )
-        db.add(settings)
-    else:
-        settings.auto_refresh = payload.auto_refresh
+        if not gym_settings:
+            gym_settings = GymPlaylistSettings(
+                user_id=current_user.id,
+                auto_refresh=payload.auto_refresh,
+                source_playlist_ids="[]",
+            )
+            db.add(gym_settings)
+        else:
+            gym_settings.auto_refresh = payload.auto_refresh
+        db.commit()
+    except Exception as e:
+        logger.error(f"Could not save auto-refresh setting: {e}")
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Einstellung konnte nicht gespeichert werden: {str(e)}",
+        )
 
-    db.commit()
     return {
-        "auto_refresh": settings.auto_refresh,
+        "auto_refresh": gym_settings.auto_refresh,
         "message": "Auto-Refresh aktiviert" if payload.auto_refresh else "Auto-Refresh deaktiviert",
     }
 

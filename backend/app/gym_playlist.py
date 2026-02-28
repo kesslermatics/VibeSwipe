@@ -25,7 +25,7 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.database import SessionLocal
 from app.models import User, GymPlaylistSettings
-from app.auth import get_valid_spotify_token
+from app.auth import get_valid_spotify_token, refresh_spotify_token
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -48,42 +48,76 @@ def song_cache_key(title: str, artist: str) -> str:
 # ── Spotify helpers ───────────────────────────────────
 
 
-async def fetch_playlist_tracks(playlist_id: str, spotify_token: str) -> list[dict]:
-    """Fetch all tracks from a Spotify playlist."""
+async def fetch_playlist_tracks(
+    playlist_id: str, spotify_token: str, user: User | None = None, db: Session | None = None
+) -> tuple[list[dict], str]:
+    """Fetch all tracks from a Spotify playlist.
+    Returns (tracks, possibly_refreshed_token)."""
     tracks: list[dict] = []
     url = f"{SPOTIFY_API}/playlists/{playlist_id}/tracks"
     params: dict | None = {"limit": 100}
     headers = {"Authorization": f"Bearer {spotify_token}"}
+    current_token = spotify_token
 
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=30) as client:
         while url:
             resp = await client.get(url, params=params, headers=headers)
-            if resp.status_code != 200:
+            logger.info(
+                f"fetch_playlist_tracks({playlist_id}): status={resp.status_code}"
+            )
+
+            # Handle 401/403 by refreshing the token once
+            if resp.status_code in (401, 403) and user and db:
                 logger.warning(
-                    f"Failed to fetch tracks for playlist {playlist_id}: "
-                    f"{resp.status_code} {resp.text[:200]}"
+                    f"fetch_playlist_tracks({playlist_id}): got {resp.status_code}, "
+                    f"refreshing token..."
                 )
-                break
+                try:
+                    current_token = await refresh_spotify_token(user, db)
+                    headers = {"Authorization": f"Bearer {current_token}"}
+                    resp = await client.get(url, params=params, headers=headers)
+                    logger.info(
+                        f"fetch_playlist_tracks({playlist_id}): after refresh status={resp.status_code}"
+                    )
+                except Exception as e:
+                    logger.error(f"Token refresh failed: {e}")
+
+            if resp.status_code != 200:
+                logger.error(
+                    f"Failed to fetch tracks for playlist {playlist_id}: "
+                    f"{resp.status_code} {resp.text[:500]}"
+                )
+                raise Exception(
+                    f"Spotify Fehler beim Laden der Playlist {playlist_id}: "
+                    f"HTTP {resp.status_code}"
+                )
 
             data = resp.json()
-            for item in data.get("items", []):
+            items = data.get("items", [])
+            logger.info(f"fetch_playlist_tracks({playlist_id}): got {len(items)} items in this page")
+
+            for item in items:
                 track = item.get("track")
-                if track and track.get("name"):
-                    artists = track.get("artists", [])
-                    artist_name = ", ".join(
-                        a["name"] for a in artists if a.get("name")
-                    ) if artists else "Unknown"
-                    tracks.append({
-                        "title": track["name"],
-                        "artist": artist_name,
-                        "uri": track.get("uri", ""),
-                    })
+                if not track:
+                    continue
+                name = track.get("name")
+                if not name:
+                    continue
+                artists = track.get("artists", [])
+                artist_name = ", ".join(
+                    a["name"] for a in artists if a.get("name")
+                ) if artists else "Unknown"
+                tracks.append({
+                    "title": name,
+                    "artist": artist_name,
+                    "uri": track.get("uri", ""),
+                })
 
             url = data.get("next")
             params = None  # next URL already includes all params
 
-    logger.info(f"Fetched {len(tracks)} tracks from playlist {playlist_id}")
-    return tracks
+    logger.info(f"fetch_playlist_tracks({playlist_id}): TOTAL {len(tracks)} tracks")
+    return tracks, current_token
 
 
 async def robust_spotify_search(
@@ -278,7 +312,9 @@ async def generate_gym_playlist(
     )
     all_tracks: list[dict] = []
     for pid in source_playlist_ids:
-        tracks = await fetch_playlist_tracks(pid, spotify_token)
+        tracks, spotify_token = await fetch_playlist_tracks(
+            pid, spotify_token, user=current_user, db=db
+        )
         all_tracks.extend(tracks)
         if len(source_playlist_ids) > 1:
             await asyncio.sleep(0.3)
@@ -322,11 +358,16 @@ async def generate_gym_playlist(
         )
 
     # 5. Delete old gym playlist if it exists
-    gym_settings = (
-        db.query(GymPlaylistSettings)
-        .filter(GymPlaylistSettings.user_id == current_user.id)
-        .first()
-    )
+    try:
+        gym_settings = (
+            db.query(GymPlaylistSettings)
+            .filter(GymPlaylistSettings.user_id == current_user.id)
+            .first()
+        )
+    except Exception as e:
+        logger.warning(f"Gym Playlist: Could not query GymPlaylistSettings (table may not exist): {e}")
+        gym_settings = None
+
     if gym_settings and gym_settings.last_spotify_playlist_id:
         logger.info(
             f"Gym Playlist: Deleting old playlist {gym_settings.last_spotify_playlist_id}"
@@ -373,19 +414,25 @@ async def generate_gym_playlist(
                 logger.error(f"Failed to add chunk {i} to gym playlist")
 
     # 7. Save/update settings in DB
-    if not gym_settings:
-        gym_settings = GymPlaylistSettings(
-            user_id=current_user.id,
-            source_playlist_ids=json.dumps(source_playlist_ids),
-            last_spotify_playlist_id=playlist_id,
-            auto_refresh=False,
-        )
-        db.add(gym_settings)
-    else:
-        gym_settings.source_playlist_ids = json.dumps(source_playlist_ids)
-        gym_settings.last_spotify_playlist_id = playlist_id
+    auto_refresh_val = False
+    try:
+        if not gym_settings:
+            gym_settings = GymPlaylistSettings(
+                user_id=current_user.id,
+                source_playlist_ids=json.dumps(source_playlist_ids),
+                last_spotify_playlist_id=playlist_id,
+                auto_refresh=False,
+            )
+            db.add(gym_settings)
+        else:
+            gym_settings.source_playlist_ids = json.dumps(source_playlist_ids)
+            gym_settings.last_spotify_playlist_id = playlist_id
+            auto_refresh_val = gym_settings.auto_refresh
 
-    db.commit()
+        db.commit()
+    except Exception as e:
+        logger.warning(f"Gym Playlist: Could not save settings to DB: {e}")
+        db.rollback()
 
     return {
         "playlist_url": playlist["external_urls"]["spotify"],
@@ -393,7 +440,7 @@ async def generate_gym_playlist(
         "playlist_name": playlist_name,
         "total_tracks": len(uris),
         "inspiration_count": len(inspiration),
-        "auto_refresh": gym_settings.auto_refresh,
+        "auto_refresh": auto_refresh_val,
     }
 
 
