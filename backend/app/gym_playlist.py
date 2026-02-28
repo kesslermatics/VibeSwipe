@@ -61,41 +61,38 @@ async def fetch_playlist_tracks(
 
     async with httpx.AsyncClient(timeout=30) as client:
         while url:
+            print(f"[GYM DEBUG] Fetching {url} with params={params}")
             resp = await client.get(url, params=params, headers=headers)
-            logger.info(
-                f"fetch_playlist_tracks({playlist_id}): status={resp.status_code}"
-            )
+            print(f"[GYM DEBUG] fetch_playlist_tracks({playlist_id}): status={resp.status_code}")
 
             # Handle 401/403 by refreshing the token once
             if resp.status_code in (401, 403) and user and db:
-                logger.warning(
-                    f"fetch_playlist_tracks({playlist_id}): got {resp.status_code}, "
-                    f"refreshing token... "
-                    f"Headers: {dict(resp.headers)}"
+                print(
+                    f"[GYM DEBUG] fetch_playlist_tracks({playlist_id}): got {resp.status_code}, "
+                    f"refreshing token... Response: {resp.text[:300]}"
                 )
                 try:
                     current_token = await refresh_spotify_token(user, db)
                     headers = {"Authorization": f"Bearer {current_token}"}
                     resp = await client.get(url, params=params, headers=headers)
-                    logger.info(
-                        f"fetch_playlist_tracks({playlist_id}): after refresh status={resp.status_code}"
+                    print(
+                        f"[GYM DEBUG] fetch_playlist_tracks({playlist_id}): after refresh status={resp.status_code} "
+                        f"Response: {resp.text[:300]}"
                     )
                 except Exception as e:
                     logger.error(f"Token refresh failed: {e}")
 
             if resp.status_code == 403:
-                logger.warning(
-                    f"fetch_playlist_tracks({playlist_id}): 403 Forbidden – "
-                    f"playlist is likely Spotify-generated or inaccessible in Dev Mode. "
-                    f"OR: Missing scopes. Please try re-logging in via Spotify! "
-                    f"Skipping. Response: {resp.text[:300]}"
+                print(
+                    f"[GYM DEBUG] fetch_playlist_tracks({playlist_id}): 403 Forbidden! "
+                    f"Response: {resp.text[:500]}"
                 )
-                return tracks, current_token  # Return what we have (possibly empty)
+                return tracks, current_token
 
             if resp.status_code != 200:
-                logger.error(
-                    f"Failed to fetch tracks for playlist {playlist_id}: "
-                    f"{resp.status_code} {resp.text[:500]}"
+                print(
+                    f"[GYM DEBUG] fetch_playlist_tracks({playlist_id}): "
+                    f"UNEXPECTED status {resp.status_code}: {resp.text[:500]}"
                 )
                 raise Exception(
                     f"Spotify Fehler beim Laden der Playlist {playlist_id}: "
@@ -104,7 +101,7 @@ async def fetch_playlist_tracks(
 
             data = resp.json()
             items = data.get("items", [])
-            logger.info(f"fetch_playlist_tracks({playlist_id}): got {len(items)} items in this page")
+            print(f"[GYM DEBUG] fetch_playlist_tracks({playlist_id}): got {len(items)} items in this page")
 
             for item in items:
                 track = item.get("track")
@@ -126,7 +123,7 @@ async def fetch_playlist_tracks(
             url = data.get("next")
             params = None  # next URL already includes all params
 
-    logger.info(f"fetch_playlist_tracks({playlist_id}): TOTAL {len(tracks)} tracks")
+    print(f"[GYM DEBUG] fetch_playlist_tracks({playlist_id}): TOTAL {len(tracks)} tracks")
     return tracks, current_token
 
 
