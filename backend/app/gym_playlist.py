@@ -54,13 +54,8 @@ async def fetch_playlist_tracks(
     """Fetch all tracks from a Spotify playlist.
     Returns (tracks, possibly_refreshed_token)."""
     tracks: list[dict] = []
-    url = f"{SPOTIFY_API}/playlists/{playlist_id}/tracks"
-    params: dict | None = {
-        "limit": 100,
-        "market": "from_token",
-        "additional_types": "track",
-        "fields": "next,items(track(name,uri,artists(name)))",
-    }
+    url = f"{SPOTIFY_API}/playlists/{playlist_id}/items"
+    params: dict | None = {"limit": 50}
     headers = {"Authorization": f"Bearer {spotify_token}"}
     current_token = spotify_token
 
