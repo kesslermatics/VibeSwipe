@@ -388,7 +388,7 @@ async def generate_gym_playlist(
 
     async with httpx.AsyncClient() as client:
         create_resp = await client.post(
-            f"{SPOTIFY_API}/users/{current_user.spotify_id}/playlists",
+            f"{SPOTIFY_API}/me/playlists",
             headers=auth_headers,
             json={
                 "name": playlist_name,
@@ -398,8 +398,11 @@ async def generate_gym_playlist(
         )
 
         if create_resp.status_code not in (200, 201):
+            logger.error(
+                f"Gym Playlist: Playlist creation failed: {create_resp.status_code} {create_resp.text[:500]}"
+            )
             raise Exception(
-                f"Playlist konnte nicht erstellt werden: {create_resp.text[:300]}"
+                f"Playlist konnte nicht erstellt werden: HTTP {create_resp.status_code} – {create_resp.text[:300]}"
             )
 
         playlist = create_resp.json()
