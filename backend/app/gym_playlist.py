@@ -103,12 +103,19 @@ async def fetch_playlist_tracks(
             items = data.get("items", [])
             print(f"[GYM DEBUG] fetch_playlist_tracks({playlist_id}): got {len(items)} items in this page")
 
-            for item in items:
+            for idx, item in enumerate(items):
+                if idx == 0:
+                    print(f"[GYM DEBUG] First item keys: {list(item.keys()) if isinstance(item, dict) else type(item)}")
+                    print(f"[GYM DEBUG] First item sample: {str(item)[:500]}")
                 track = item.get("track")
                 if not track:
+                    if idx < 3:
+                        print(f"[GYM DEBUG] Item {idx} has no 'track' key. Item: {str(item)[:300]}")
                     continue
                 name = track.get("name")
                 if not name:
+                    if idx < 3:
+                        print(f"[GYM DEBUG] Item {idx} track has no 'name'. Track: {str(track)[:300]}")
                     continue
                 artists = track.get("artists", [])
                 artist_name = ", ".join(
