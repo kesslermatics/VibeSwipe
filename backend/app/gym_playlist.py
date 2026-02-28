@@ -52,10 +52,7 @@ async def fetch_playlist_tracks(playlist_id: str, spotify_token: str) -> list[di
     """Fetch all tracks from a Spotify playlist."""
     tracks: list[dict] = []
     url = f"{SPOTIFY_API}/playlists/{playlist_id}/tracks"
-    params: dict = {
-        "fields": "items(track(name,artists(name),uri)),next",
-        "limit": 100,
-    }
+    params: dict | None = {"limit": 100}
     headers = {"Authorization": f"Bearer {spotify_token}"}
 
     async with httpx.AsyncClient() as client:
@@ -72,16 +69,20 @@ async def fetch_playlist_tracks(playlist_id: str, spotify_token: str) -> list[di
             for item in data.get("items", []):
                 track = item.get("track")
                 if track and track.get("name"):
+                    artists = track.get("artists", [])
+                    artist_name = ", ".join(
+                        a["name"] for a in artists if a.get("name")
+                    ) if artists else "Unknown"
                     tracks.append({
                         "title": track["name"],
-                        "artist": ", ".join(
-                            a["name"] for a in track.get("artists", [])
-                        ),
+                        "artist": artist_name,
                         "uri": track.get("uri", ""),
                     })
-            url = data.get("next")
-            params = {}
 
+            url = data.get("next")
+            params = None  # next URL already includes all params
+
+    logger.info(f"Fetched {len(tracks)} tracks from playlist {playlist_id}")
     return tracks
 
 
