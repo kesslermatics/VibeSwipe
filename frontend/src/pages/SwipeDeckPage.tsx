@@ -28,6 +28,8 @@ export default function SwipeDeckPage({ onLogout: _onLogout }: { onLogout: () =>
     const [skippedCount, setSkippedCount] = useState(0);
 
     const audioRef = useRef<HTMLAudioElement | null>(null);
+    // audioRef kept for future use
+    void audioRef;
 
     // Load user playlists on mount
     useEffect(() => {
@@ -63,23 +65,7 @@ export default function SwipeDeckPage({ onLogout: _onLogout }: { onLogout: () =>
         }
     }, []);
 
-    // Play audio when current track changes
-    useEffect(() => {
-        if (phase !== "swiping" || !currentTrack) return;
-        const audio = audioRef.current;
-        if (!audio) return;
-        if (currentTrack.preview_url) {
-            audio.src = currentTrack.preview_url;
-            audio.load();
-            audio.play().catch(() => { /* autoplay blocked */ });
-        } else {
-            audio.pause();
-            audio.src = "";
-        }
-        return () => {
-            audio.pause();
-        };
-    }, [currentIndex, phase, currentTrack]);
+    // Audio playback handled by Spotify embed inside SwipeCard
 
     const advanceCard = useCallback(
         async (direction: "left" | "right") => {
@@ -151,8 +137,7 @@ export default function SwipeDeckPage({ onLogout: _onLogout }: { onLogout: () =>
                     </div>
                 )}
 
-                {/* Hidden audio element */}
-                <audio ref={audioRef} />
+                {/* No hidden audio element needed — Spotify embed handles playback */}
 
                 {/* ── PICK PLAYLIST ── */}
                 {phase === "pick-playlist" && (
@@ -337,6 +322,9 @@ function SwipeCard({
     const rotate = useTransform(x, [-200, 200], [-18, 18]);
     const opacity = useTransform(x, [-200, -100, 0, 100, 200], [0.5, 1, 1, 1, 0.5]);
 
+    // Extract track ID from spotify_uri (spotify:track:XXXX)
+    const trackId = track.spotify_uri?.split(":")[2] || null;
+
     const handleDrag = (_: unknown, info: PanInfo) => {
         if (info.offset.x > 60) {
             onDragLabel("like");
@@ -376,7 +364,7 @@ function SwipeCard({
         >
             <div className="h-full w-full overflow-hidden rounded-3xl bg-gray-900 shadow-2xl ring-1 ring-white/10">
                 {/* Album art */}
-                <div className="relative h-[340px] w-full overflow-hidden bg-gray-800">
+                <div className="relative h-[260px] w-full overflow-hidden bg-gray-800">
                     {track.album_image ? (
                         <img
                             src={track.album_image}
@@ -394,28 +382,29 @@ function SwipeCard({
                 </div>
 
                 {/* Track info */}
-                <div className="px-6 py-5">
+                <div className="px-6 py-3">
                     <h3 className="truncate text-lg font-bold text-gray-100">
                         {track.title}
                     </h3>
                     <p className="truncate text-sm text-gray-400">{track.artist}</p>
-                    <p className="mt-1 truncate text-xs text-gray-600">{track.album}</p>
-
-                    {/* Audio visualizer bar (fake) */}
-                    <div className="mt-3 flex items-center gap-1">
-                        {Array.from({ length: 20 }).map((_, i) => (
-                            <div
-                                key={i}
-                                className="w-1 animate-pulse rounded-full bg-purple-500/60"
-                                style={{
-                                    height: `${Math.random() * 16 + 4}px`,
-                                    animationDelay: `${i * 0.05}s`,
-                                }}
-                            />
-                        ))}
-                        <span className="ml-auto text-[10px] text-gray-500">30s Preview</span>
-                    </div>
+                    <p className="mt-0.5 truncate text-xs text-gray-600">{track.album}</p>
                 </div>
+
+                {/* Spotify Embed Player */}
+                {trackId && (
+                    <div className="px-4 pb-3" onPointerDownCapture={(e) => e.stopPropagation()}>
+                        <iframe
+                            key={`embed-${trackId}`}
+                            src={`https://open.spotify.com/embed/track/${trackId}?utm_source=generator&theme=0`}
+                            width="100%"
+                            height="80"
+                            frameBorder="0"
+                            allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
+                            loading="lazy"
+                            style={{ border: "none", borderRadius: "12px" }}
+                        />
+                    </div>
+                )}
             </div>
         </motion.div>
     );

@@ -662,7 +662,7 @@ Antworte NUR mit diesem JSON-Format:
         gemini_payload = {
             "contents": [{"parts": [{"text": prompt}]}],
             "generationConfig": {
-                "temperature": 1.5,
+                "temperature": 0.9,
                 "maxOutputTokens": 4096,
                 "responseMimeType": "application/json",
             },
@@ -685,8 +685,24 @@ Antworte NUR mit diesem JSON-Format:
                     if g_text.endswith("```"):
                         g_text = g_text[:-3]
                     g_text = g_text.strip()
-                parsed = json.loads(g_text)
-                gemini_songs = parsed.get("songs", [])
+
+                # Try normal parse first
+                try:
+                    parsed = json.loads(g_text)
+                    gemini_songs = parsed.get("songs", [])
+                except json.JSONDecodeError:
+                    # Repair: extract title/artist pairs via regex
+                    import re
+                    pairs = re.findall(
+                        r'"title"\s*:\s*"([^"]+)"\s*,\s*"artist"\s*:\s*"([^"]+)"',
+                        g_text,
+                    )
+                    if pairs:
+                        gemini_songs = [{"title": t, "artist": a} for t, a in pairs]
+                        print(f"SWIPE: Repaired {len(gemini_songs)} songs from broken JSON")
+                    else:
+                        raise
+
                 if gemini_songs:
                     break
             except Exception as e:
