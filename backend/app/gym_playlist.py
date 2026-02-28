@@ -82,6 +82,14 @@ async def fetch_playlist_tracks(
                 except Exception as e:
                     logger.error(f"Token refresh failed: {e}")
 
+            if resp.status_code == 403:
+                logger.warning(
+                    f"fetch_playlist_tracks({playlist_id}): 403 Forbidden – "
+                    f"playlist is likely Spotify-generated or inaccessible in Dev Mode. "
+                    f"Skipping. Response: {resp.text[:300]}"
+                )
+                return tracks, current_token  # Return what we have (possibly empty)
+
             if resp.status_code != 200:
                 logger.error(
                     f"Failed to fetch tracks for playlist {playlist_id}: "
@@ -311,18 +319,34 @@ async def generate_gym_playlist(
         f"Gym Playlist: Fetching tracks from {len(source_playlist_ids)} playlists..."
     )
     all_tracks: list[dict] = []
+    skipped_playlists: list[str] = []
     for pid in source_playlist_ids:
-        tracks, spotify_token = await fetch_playlist_tracks(
-            pid, spotify_token, user=current_user, db=db
-        )
-        all_tracks.extend(tracks)
+        try:
+            tracks, spotify_token = await fetch_playlist_tracks(
+                pid, spotify_token, user=current_user, db=db
+            )
+            if tracks:
+                all_tracks.extend(tracks)
+            else:
+                skipped_playlists.append(pid)
+                logger.warning(f"Gym Playlist: Playlist {pid} returned 0 tracks (skipped)")
+        except Exception as e:
+            skipped_playlists.append(pid)
+            logger.warning(f"Gym Playlist: Skipping playlist {pid} due to error: {e}")
         if len(source_playlist_ids) > 1:
             await asyncio.sleep(0.3)
+
+    if skipped_playlists:
+        logger.info(
+            f"Gym Playlist: Skipped {len(skipped_playlists)}/{len(source_playlist_ids)} "
+            f"playlists (403/inaccessible): {skipped_playlists}"
+        )
 
     if len(all_tracks) < 5:
         raise Exception(
             "Zu wenige Songs in den ausgewählten Playlists. "
-            "Wähle Playlists mit mehr Songs aus!"
+            "Einige Playlists konnten nicht geladen werden (z.B. Spotify-generierte wie 'Discover Weekly'). "
+            "Wähle andere Playlists mit mehr eigenen Songs aus!"
         )
 
     logger.info(f"Gym Playlist: Got {len(all_tracks)} total tracks")
