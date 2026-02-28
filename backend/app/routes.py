@@ -562,51 +562,75 @@ async def get_swipe_deck(
     headers = {"Authorization": f"Bearer {spotify_token}"}
 
     try:
-        # 1. Get user's top tracks as seeds (short_term for current taste)
+        import asyncio, random
+
+        # 1. Get user's top artists (short_term for current taste)
         async with httpx.AsyncClient() as client:
             top_resp = await client.get(
-                f"{SPOTIFY_API_BASE}/me/top/tracks",
-                params={"limit": 5, "time_range": "short_term"},
+                f"{SPOTIFY_API_BASE}/me/top/artists",
+                params={"limit": 10, "time_range": "short_term"},
                 headers=headers,
             )
         if top_resp.status_code != 200:
-            raise HTTPException(status_code=top_resp.status_code, detail="Konnte Top-Tracks nicht laden")
+            raise HTTPException(status_code=top_resp.status_code, detail="Konnte Top-Artists nicht laden")
 
-        top_items = top_resp.json().get("items", [])
-        if len(top_items) < 1:
+        top_artists = top_resp.json().get("items", [])
+        if len(top_artists) < 1:
             raise HTTPException(
                 status_code=400,
                 detail="Du brauchst mindestens ein paar gehörte Songs für Swipe-Empfehlungen!",
             )
 
-        seed_track_ids = [t["id"] for t in top_items[:5]]
+        # 2. Get related artists for each top artist
+        related_artist_ids: set[str] = set()
+        top_artist_ids = {a["id"] for a in top_artists}
 
-        # 2. Get recommendations from Spotify
-        async with httpx.AsyncClient() as client:
-            rec_resp = await client.get(
-                f"{SPOTIFY_API_BASE}/recommendations",
-                params={
-                    "seed_tracks": ",".join(seed_track_ids),
-                    "limit": 100,  # Request more to filter for preview_url
-                    "market": "DE",
-                },
-                headers=headers,
-            )
-        if rec_resp.status_code != 200:
-            logger.error(f"Swipe recommendations failed: {rec_resp.status_code} {rec_resp.text[:300]}")
-            raise HTTPException(status_code=rec_resp.status_code, detail="Empfehlungen konnten nicht geladen werden")
+        for artist in top_artists[:5]:
+            await asyncio.sleep(0.2)  # light rate-limit spacing
+            async with httpx.AsyncClient() as client:
+                rel_resp = await client.get(
+                    f"{SPOTIFY_API_BASE}/artists/{artist['id']}/related-artists",
+                    headers=headers,
+                )
+            if rel_resp.status_code == 200:
+                for ra in rel_resp.json().get("artists", []):
+                    if ra["id"] not in top_artist_ids:
+                        related_artist_ids.add(ra["id"])
 
-        rec_tracks = rec_resp.json().get("tracks", [])
+        logger.info(f"Swipe Deck: Found {len(related_artist_ids)} related artists")
 
-        # 3. Filter: only tracks WITH a preview_url
-        tracks_with_preview = []
-        for t in rec_tracks:
+        if not related_artist_ids:
+            raise HTTPException(status_code=404, detail="Keine verwandten Artists gefunden")
+
+        # 3. Get top tracks from a random sample of related artists
+        sampled = random.sample(list(related_artist_ids), min(8, len(related_artist_ids)))
+        all_tracks: list[dict] = []
+
+        for artist_id in sampled:
+            await asyncio.sleep(0.2)
+            async with httpx.AsyncClient() as client:
+                tt_resp = await client.get(
+                    f"{SPOTIFY_API_BASE}/artists/{artist_id}/top-tracks",
+                    params={"market": "DE"},
+                    headers=headers,
+                )
+            if tt_resp.status_code == 200:
+                all_tracks.extend(tt_resp.json().get("tracks", []))
+
+        # 4. Deduplicate by track ID, filter for preview_url
+        seen_ids: set[str] = set()
+        tracks_with_preview: list[dict] = []
+        random.shuffle(all_tracks)
+
+        for t in all_tracks:
+            tid = t["id"]
             preview = t.get("preview_url")
-            if not preview:
+            if tid in seen_ids or not preview:
                 continue
+            seen_ids.add(tid)
             images = t.get("album", {}).get("images", [])
             tracks_with_preview.append({
-                "id": t["id"],
+                "id": tid,
                 "title": t["name"],
                 "artist": ", ".join(a["name"] for a in t.get("artists", [])),
                 "album": t.get("album", {}).get("name", ""),
@@ -615,7 +639,13 @@ async def get_swipe_deck(
                 "spotify_uri": t.get("uri", ""),
             })
 
-        logger.info(f"Swipe Deck: {len(tracks_with_preview)}/{len(rec_tracks)} tracks have previews")
+        logger.info(f"Swipe Deck: {len(tracks_with_preview)}/{len(all_tracks)} tracks have previews")
+
+        if not tracks_with_preview:
+            raise HTTPException(
+                status_code=404,
+                detail="Keine Songs mit Preview gefunden. Versuche es später nochmal!",
+            )
 
         return {"tracks": tracks_with_preview[:30]}
 

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { motion, useMotionValue, useTransform, animate, PanInfo } from "framer-motion";
+import { motion, useMotionValue, useTransform, animate, type PanInfo } from "framer-motion";
 import { getSwipeDeck, saveTrack, type SwipeTrack } from "../lib/api";
 
 type Phase = "intro" | "swiping" | "empty";

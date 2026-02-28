@@ -9,8 +9,10 @@ Flow:
 5. Send everything to Gemini for a sarcastic roast
 """
 
+import asyncio
 import json
 import logging
+import re
 
 import httpx
 
@@ -58,7 +60,10 @@ async def fetch_top_artists(spotify_token: str, limit: int = 50) -> list[dict]:
 async def fetch_audio_features_bulk(
     track_ids: list[str], spotify_token: str
 ) -> list[dict]:
-    """Bulk-fetch audio features (up to 100 IDs per request)."""
+    """Bulk-fetch audio features (up to 100 IDs per request).
+    
+    Falls back gracefully if endpoint returns 403 (dev-mode restriction).
+    """
     all_features: list[dict] = []
     headers = {"Authorization": f"Bearer {spotify_token}"}
 
@@ -75,6 +80,9 @@ async def fetch_audio_features_bulk(
         if resp.status_code == 200:
             features = resp.json().get("audio_features", [])
             all_features.extend([f for f in features if f is not None])
+        elif resp.status_code == 403:
+            logger.warning("Roast: Audio features endpoint restricted (403). Using defaults.")
+            return []  # Will trigger default values in compute_avg_features
         else:
             logger.warning(f"Roast: Audio features fetch failed: {resp.status_code}")
 
@@ -169,33 +177,69 @@ Regeln:
         "generationConfig": {
             "temperature": 1.5,
             "maxOutputTokens": 2048,
+            "responseMimeType": "application/json",
         },
     }
 
-    async with httpx.AsyncClient(timeout=60) as client:
-        resp = await client.post(GEMINI_URL, json=payload)
+    last_error = None
+    for attempt in range(3):
+        if attempt > 0:
+            logger.info(f"Roast Gemini retry {attempt + 1}/3")
+            await asyncio.sleep(1)
 
-    if resp.status_code != 200:
-        raise Exception(f"Gemini API error: {resp.status_code} – {resp.text[:300]}")
+        async with httpx.AsyncClient(timeout=60) as client:
+            resp = await client.post(GEMINI_URL, json=payload)
 
-    data = resp.json()
-    try:
-        text = data["candidates"][0]["content"]["parts"][0]["text"]
-    except (KeyError, IndexError) as e:
-        raise Exception(f"Unexpected Gemini response: {e}")
+        if resp.status_code != 200:
+            last_error = f"Gemini API error: {resp.status_code} – {resp.text[:300]}"
+            continue
 
-    text = text.strip()
-    if text.startswith("```"):
-        text = text.split("\n", 1)[1]
-        if text.endswith("```"):
-            text = text[:-3]
+        data = resp.json()
+        try:
+            text = data["candidates"][0]["content"]["parts"][0]["text"]
+        except (KeyError, IndexError) as e:
+            last_error = f"Unexpected Gemini response: {e}"
+            continue
+
         text = text.strip()
+        if text.startswith("```"):
+            text = text.split("\n", 1)[1]
+            if text.endswith("```"):
+                text = text[:-3]
+            text = text.strip()
 
+        try:
+            result = json.loads(text)
+            if "persona" in result and "roast" in result:
+                return result
+            last_error = f"JSON missing required keys: {list(result.keys())}"
+            continue
+        except json.JSONDecodeError:
+            # Try to repair truncated JSON
+            repaired = _try_repair_json(text)
+            if repaired and "persona" in repaired and "roast" in repaired:
+                logger.info("Roast: Repaired truncated Gemini JSON")
+                return repaired
+            last_error = f"Invalid JSON after repair attempt: {text[:200]}"
+            continue
+
+    raise Exception(f"Gemini failed after 3 attempts: {last_error}")
+
+
+def _try_repair_json(text: str) -> dict | None:
+    """Attempt to repair truncated JSON from Gemini."""
     try:
-        return json.loads(text)
-    except json.JSONDecodeError as e:
-        logger.error(f"Gemini returned invalid JSON for roast: {text[:500]}")
-        raise Exception(f"Gemini returned invalid JSON: {e}")
+        # Try extracting persona and roast via regex
+        persona_m = re.search(r'"persona"\s*:\s*"([^"]+)"', text)
+        roast_m = re.search(r'"roast"\s*:\s*"((?:[^"\\]|\\.)*)"?', text, re.DOTALL)
+        if persona_m and roast_m:
+            return {
+                "persona": persona_m.group(1),
+                "roast": roast_m.group(1).replace('\\n', ' ').strip(),
+            }
+    except Exception:
+        pass
+    return None
 
 
 async def generate_vibe_roast(spotify_token: str) -> dict:
@@ -203,8 +247,6 @@ async def generate_vibe_roast(spotify_token: str) -> dict:
     logger.info("Vibe Roast: Starting...")
 
     # 1. Fetch top tracks + top artists in parallel
-    import asyncio
-
     top_tracks_raw, top_artists_raw = await asyncio.gather(
         fetch_top_tracks(spotify_token),
         fetch_top_artists(spotify_token),
