@@ -414,6 +414,8 @@ async def generate_gym_playlist(
         f"{len(uris)} motivierende Tracks"
     )
 
+    # Refresh token before playlist operations (may have gone stale during searches)
+    spotify_token = await get_valid_spotify_token(current_user, db)
     auth_headers = {"Authorization": f"Bearer {spotify_token}"}
 
     # 6a. Create playlist (eigener Client – wie in routes.py)
@@ -438,6 +440,10 @@ async def generate_gym_playlist(
 
     playlist = create_resp.json()
     playlist_id = playlist["id"]
+    print(f"[GYM DEBUG] Playlist created: {playlist_id}")
+
+    # Small delay to let Spotify propagate the new playlist
+    await asyncio.sleep(1)
 
     # 6b. Add tracks in chunks of 100 (eigener Client pro Chunk – wie in routes.py)
     for i in range(0, len(uris), 100):
@@ -453,7 +459,23 @@ async def generate_gym_playlist(
                 f"[GYM DEBUG] Failed to add tracks chunk {i}: "
                 f"status={add_resp.status_code} body={add_resp.text[:500]}"
             )
-            logger.error(f"Failed to add tracks chunk {i}: {add_resp.status_code}")
+            # Try once more with a fresh token
+            spotify_token = await get_valid_spotify_token(current_user, db)
+            auth_headers = {"Authorization": f"Bearer {spotify_token}"}
+            async with httpx.AsyncClient() as client2:
+                retry_resp = await client2.post(
+                    f"{SPOTIFY_API}/playlists/{playlist_id}/tracks",
+                    headers=auth_headers,
+                    json={"uris": chunk},
+                )
+            if retry_resp.status_code not in (200, 201):
+                print(
+                    f"[GYM DEBUG] Retry also failed: status={retry_resp.status_code} "
+                    f"body={retry_resp.text[:500]}"
+                )
+                logger.error(f"Failed to add tracks chunk {i} even after retry: {retry_resp.status_code}")
+            else:
+                print(f"[GYM DEBUG] Retry succeeded for chunk {i}")
         else:
             print(f"[GYM DEBUG] Added chunk {i} ({len(chunk)} tracks) to playlist")
 
