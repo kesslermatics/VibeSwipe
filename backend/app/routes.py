@@ -198,16 +198,17 @@ async def discover(
                 playlist_id = playlist_data["id"]
                 playlist_url = playlist_data["external_urls"]["spotify"]
 
-                # Add tracks in chunks of 100
+                # Small delay to let Spotify propagate the new playlist
+                import asyncio
+                await asyncio.sleep(1)
+
+                # Add tracks in chunks of 100 (use /items not /tracks)
                 for i in range(0, len(track_uris), 100):
                     chunk = track_uris[i:i + 100]
                     async with httpx.AsyncClient() as client:
                         add_resp = await client.post(
-                            f"{SPOTIFY_API_BASE}/playlists/{playlist_id}/tracks",
-                            headers={
-                                "Authorization": f"Bearer {spotify_token}",
-                                "Content-Type": "application/json",
-                            },
+                            f"{SPOTIFY_API_BASE}/playlists/{playlist_id}/items",
+                            headers={"Authorization": f"Bearer {spotify_token}"},
                             json={"uris": chunk},
                         )
                     if add_resp.status_code not in (200, 201):
