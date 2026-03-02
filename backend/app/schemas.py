@@ -28,6 +28,8 @@ class MessageResponse(BaseModel):
 class DiscoverRequest(BaseModel):
     prompt: str
     context_songs: list[str] = []  # e.g. ["Song - Artist", ...] from a playlist
+    save_to_playlist: bool = False
+    include_my_taste: bool = False
 
 
 class SongResult(BaseModel):
@@ -42,6 +44,9 @@ class SongResult(BaseModel):
 class DiscoverResponse(BaseModel):
     songs: list[SongResult]
     mood_summary: str
+    playlist_url: str | None = None
+    playlist_id: str | None = None
+    playlist_name: str | None = None
 
 
 # ── Playlist ──────────────────────────────────────────

@@ -31,10 +31,39 @@ Rules:
 - Consider the language/culture of the request (e.g. German input → include some German/European artists)
 - Only output valid JSON, no markdown, no explanation"""
 
+SYSTEM_PROMPT_WITH_PLAYLIST = """You are a music recommendation expert. The user will describe a mood, vibe, activity, or specific song preferences.
 
-async def ask_gemini(prompt: str, context_songs: list[str] | None = None) -> dict:
+Your job is to recommend exactly 50 songs that perfectly match their request.
+You must also generate a creative, catchy playlist name and a short playlist description that captures the vibe.
+
+Respond ONLY with valid JSON in this exact format, nothing else:
+{
+  "mood_summary": "A short 1-sentence description of the vibe/mood you interpreted",
+  "playlist_name": "A creative, catchy playlist name (max 5 words)",
+  "playlist_description": "A short fun description for the playlist (1-2 sentences)",
+  "songs": [
+    {"title": "Song Name", "artist": "Artist Name"},
+    ...
+  ]
+}
+
+Rules:
+- Always recommend exactly 50 songs
+- Mix well-known and lesser-known tracks
+- Consider the language/culture of the request (e.g. German input → include some German/European artists)
+- Only output valid JSON, no markdown, no explanation
+- The playlist name should be creative and match the vibe, not generic"""
+
+
+async def ask_gemini(
+    prompt: str,
+    context_songs: list[str] | None = None,
+    on_repeat_songs: list[dict] | None = None,
+    save_to_playlist: bool = False,
+) -> dict:
     """Ask Gemini to interpret the mood and suggest songs."""
-    parts = [{"text": SYSTEM_PROMPT}]
+    system = SYSTEM_PROMPT_WITH_PLAYLIST if save_to_playlist else SYSTEM_PROMPT
+    parts = [{"text": system}]
 
     # If the user provided a playlist as context, include it
     if context_songs:
@@ -45,6 +74,18 @@ async def ask_gemini(prompt: str, context_songs: list[str] | None = None) -> dic
                 "Use this playlist as inspiration for the style/mood/genre. "
                 "Recommend songs that fit the same vibe but DO NOT include any of these songs in your recommendations. "
                 "Avoid duplicates completely."
+            )
+        })
+
+    # If "include my taste" is enabled, add user's top tracks as style reference
+    if on_repeat_songs:
+        taste_list = "\n".join(f"- {s['title']} by {s['artist']}" for s in on_repeat_songs[:30])
+        parts.append({
+            "text": (
+                f"Here are the user's current favorite/most-played songs (their taste profile):\n{taste_list}\n\n"
+                "Use this to understand the user's music taste and style preferences. "
+                "Your recommendations should align with their taste while still following the user's request. "
+                "DO NOT include any of these songs in your recommendations."
             )
         })
 
@@ -107,9 +148,15 @@ async def search_spotify(query: str, spotify_token: str) -> dict | None:
     }
 
 
-async def discover_songs(prompt: str, spotify_token: str, context_songs: list[str] | None = None) -> dict:
+async def discover_songs(
+    prompt: str,
+    spotify_token: str,
+    context_songs: list[str] | None = None,
+    on_repeat_songs: list[dict] | None = None,
+    save_to_playlist: bool = False,
+) -> dict:
     """Full pipeline: Gemini interprets mood → Spotify searches for each song (parallel)."""
-    gemini_result = await ask_gemini(prompt, context_songs)
+    gemini_result = await ask_gemini(prompt, context_songs, on_repeat_songs, save_to_playlist)
 
     async def fetch_song(song: dict) -> dict:
         query = f"{song['title']} {song['artist']}"
@@ -131,5 +178,7 @@ async def discover_songs(prompt: str, spotify_token: str, context_songs: list[st
 
     return {
         "mood_summary": gemini_result.get("mood_summary", ""),
+        "playlist_name": gemini_result.get("playlist_name"),
+        "playlist_description": gemini_result.get("playlist_description"),
         "songs": list(songs),
     }

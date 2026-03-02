@@ -13,7 +13,7 @@ from app.models import User
 from app.schemas import SpotifyCallback, Token, UserResponse, MessageResponse, DiscoverRequest, DiscoverResponse, CreatePlaylistRequest, CreatePlaylistResponse, SaveTracksRequest, SaveTracksResponse, DailyDriveRequest, DailyDriveResponse, GymPlaylistGenerateRequest, GymPlaylistGenerateResponse, GymPlaylistSettingsResponse, GymPlaylistAutoRefreshRequest, SwipeDeckResponse, RoastResponse
 from app.auth import create_access_token, get_current_user, get_valid_spotify_token, refresh_spotify_token
 from app.discover import discover_songs
-from app.daily_drive import fetch_saved_shows, generate_daily_drive
+from app.daily_drive import fetch_saved_shows, generate_daily_drive, fetch_on_repeat_tracks
 from app.gym_playlist import generate_gym_playlist
 from app.roast import generate_vibe_roast
 from app.models import GymPlaylistSettings
@@ -153,11 +153,80 @@ async def discover(
     spotify_token = await get_valid_spotify_token(current_user, db)
 
     try:
+        # Fetch user's top tracks if "include my taste" is enabled
+        on_repeat_songs = None
+        if payload.include_my_taste:
+            try:
+                on_repeat_songs = await fetch_on_repeat_tracks(spotify_token)
+            except Exception as e:
+                logger.warning(f"Could not fetch on-repeat tracks: {e}")
+
         result = await discover_songs(
             payload.prompt,
             spotify_token,
             context_songs=payload.context_songs or None,
+            on_repeat_songs=on_repeat_songs,
+            save_to_playlist=payload.save_to_playlist,
         )
+
+        # Create Spotify playlist if "save to playlist" is enabled
+        if payload.save_to_playlist:
+            track_uris = [s["spotify_uri"] for s in result["songs"] if s.get("spotify_uri")]
+            if track_uris:
+                playlist_name = result.get("playlist_name") or "Discover Mix"
+                playlist_desc = result.get("playlist_description") or result.get("mood_summary", "")
+
+                # Get user's Spotify ID
+                async with httpx.AsyncClient() as client:
+                    me_resp = await client.get(
+                        f"{SPOTIFY_API_BASE}/me",
+                        headers={"Authorization": f"Bearer {spotify_token}"},
+                    )
+                if me_resp.status_code != 200:
+                    raise Exception(f"Could not get Spotify user: {me_resp.status_code}")
+                spotify_user_id = me_resp.json()["id"]
+
+                # Create playlist
+                async with httpx.AsyncClient() as client:
+                    create_resp = await client.post(
+                        f"{SPOTIFY_API_BASE}/users/{spotify_user_id}/playlists",
+                        headers={
+                            "Authorization": f"Bearer {spotify_token}",
+                            "Content-Type": "application/json",
+                        },
+                        json={
+                            "name": playlist_name,
+                            "description": playlist_desc,
+                            "public": False,
+                        },
+                    )
+                if create_resp.status_code not in (200, 201):
+                    logger.error(f"Create playlist failed: {create_resp.status_code} {create_resp.text[:300]}")
+                    raise Exception(f"Could not create playlist: {create_resp.status_code}")
+
+                playlist_data = create_resp.json()
+                playlist_id = playlist_data["id"]
+                playlist_url = playlist_data["external_urls"]["spotify"]
+
+                # Add tracks in chunks of 100
+                for i in range(0, len(track_uris), 100):
+                    chunk = track_uris[i:i + 100]
+                    async with httpx.AsyncClient() as client:
+                        add_resp = await client.post(
+                            f"{SPOTIFY_API_BASE}/playlists/{playlist_id}/tracks",
+                            headers={
+                                "Authorization": f"Bearer {spotify_token}",
+                                "Content-Type": "application/json",
+                            },
+                            json={"uris": chunk},
+                        )
+                    if add_resp.status_code not in (200, 201):
+                        logger.error(f"Add tracks failed: {add_resp.status_code} {add_resp.text[:300]}")
+
+                result["playlist_url"] = playlist_url
+                result["playlist_id"] = playlist_id
+                result["playlist_name"] = playlist_name
+
         return result
     except Exception as e:
         raise HTTPException(
