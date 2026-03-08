@@ -16,6 +16,7 @@ from app.discover import discover_songs
 from app.daily_drive import fetch_saved_shows, generate_daily_drive, fetch_on_repeat_tracks
 from app.gym_playlist import generate_gym_playlist
 from app.roast import generate_vibe_roast
+from app.cover_gen import generate_playlist_cover, upload_playlist_cover
 from app.models import GymPlaylistSettings
 import json
 
@@ -215,6 +216,30 @@ async def discover(
                         )
                     if add_resp.status_code not in (200, 201):
                         logger.error(f"Add tracks failed: {add_resp.status_code} {add_resp.text[:300]}")
+
+                # Generate and upload AI cover image (async, non-blocking)
+                try:
+                    cover_b64 = await generate_playlist_cover(
+                        playlist_name=playlist_name,
+                        mood_summary=result.get("mood_summary", ""),
+                        playlist_description=playlist_desc,
+                    )
+                    if cover_b64:
+                        # Refresh token again for cover upload
+                        spotify_token = await get_valid_spotify_token(current_user, db)
+                        cover_uploaded = await upload_playlist_cover(
+                            playlist_id=playlist_id,
+                            image_base64=cover_b64,
+                            spotify_token=spotify_token,
+                        )
+                        if cover_uploaded:
+                            logger.info(f"[Discover Route] AI cover uploaded for playlist {playlist_id}")
+                        else:
+                            logger.warning(f"[Discover Route] Cover upload failed, using default")
+                    else:
+                        logger.warning(f"[Discover Route] Cover generation returned None")
+                except Exception as cover_err:
+                    logger.warning(f"[Discover Route] Cover generation failed (non-fatal): {cover_err}")
 
                 result["playlist_url"] = playlist_url
                 result["playlist_id"] = playlist_id

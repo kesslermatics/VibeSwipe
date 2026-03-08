@@ -1,0 +1,182 @@
+"""
+Playlist Cover Generation using Gemini Image Generation
+"""
+import base64
+import logging
+import httpx
+from io import BytesIO
+
+from app.config import get_settings
+
+settings = get_settings()
+logger = logging.getLogger(__name__)
+
+# Gemini Image Generation endpoint
+GEMINI_IMAGE_URL = (
+    f"https://generativelanguage.googleapis.com/v1beta/models/"
+    f"gemini-3.1-flash-image-preview:generateContent?key={settings.gemini_api_key}"
+)
+
+
+async def generate_playlist_cover(
+    playlist_name: str,
+    mood_summary: str,
+    playlist_description: str | None = None,
+) -> str | None:
+    """
+    Generate a playlist cover image using Gemini.
+    Returns base64-encoded JPEG string ready for Spotify API, or None on failure.
+    
+    Spotify requirements:
+    - Base64-encoded JPEG
+    - Square image recommended
+    - Max 256KB
+    """
+    # Build a creative prompt for the image
+    desc = playlist_description or mood_summary
+    prompt = f"""Create a stylish, artistic album cover for a Spotify playlist.
+
+Playlist name: "{playlist_name}"
+Mood/Vibe: {mood_summary}
+Description: {desc}
+
+Requirements:
+- Abstract, artistic style (no text, no letters, no words)
+- Vibrant colors that match the mood
+- Modern, clean aesthetic suitable for a music streaming app
+- Square format, visually striking
+- No faces, no people, no photorealistic elements
+- Think: gradient backgrounds, geometric shapes, abstract patterns, nature elements
+
+Create an image that captures the FEELING of this music."""
+
+    payload = {
+        "contents": [
+            {
+                "parts": [{"text": prompt}]
+            }
+        ],
+        "generationConfig": {
+            "responseModalities": ["TEXT", "IMAGE"],
+        },
+    }
+
+    try:
+        logger.info(f"[CoverGen] Generating cover for '{playlist_name}'...")
+        
+        async with httpx.AsyncClient(timeout=60) as client:
+            resp = await client.post(GEMINI_IMAGE_URL, json=payload)
+
+        if resp.status_code != 200:
+            logger.error(f"[CoverGen] Gemini API error: {resp.status_code} - {resp.text[:300]}")
+            return None
+
+        data = resp.json()
+        
+        # Extract the image from the response
+        # Gemini returns images in candidates[0].content.parts[] with inlineData
+        candidates = data.get("candidates", [])
+        if not candidates:
+            logger.warning("[CoverGen] No candidates in Gemini response")
+            return None
+
+        parts = candidates[0].get("content", {}).get("parts", [])
+        
+        for part in parts:
+            if "inlineData" in part:
+                inline_data = part["inlineData"]
+                mime_type = inline_data.get("mimeType", "")
+                image_data = inline_data.get("data", "")
+                
+                if image_data:
+                    logger.info(f"[CoverGen] Got image, mimeType={mime_type}, size={len(image_data)} chars")
+                    
+                    # If it's already JPEG, return as-is
+                    if "jpeg" in mime_type.lower() or "jpg" in mime_type.lower():
+                        return image_data
+                    
+                    # Otherwise, we need to convert to JPEG
+                    # Decode, convert with PIL, re-encode
+                    try:
+                        from PIL import Image
+                        
+                        raw_bytes = base64.b64decode(image_data)
+                        img = Image.open(BytesIO(raw_bytes))
+                        
+                        # Convert to RGB if necessary (e.g., PNG with alpha)
+                        if img.mode in ("RGBA", "P"):
+                            img = img.convert("RGB")
+                        
+                        # Resize to 640x640 (Spotify recommended)
+                        img = img.resize((640, 640), Image.Resampling.LANCZOS)
+                        
+                        # Save as JPEG with good quality
+                        buffer = BytesIO()
+                        img.save(buffer, format="JPEG", quality=85)
+                        jpeg_bytes = buffer.getvalue()
+                        
+                        # Check size (Spotify limit: 256KB)
+                        if len(jpeg_bytes) > 256 * 1024:
+                            # Reduce quality
+                            buffer = BytesIO()
+                            img.save(buffer, format="JPEG", quality=60)
+                            jpeg_bytes = buffer.getvalue()
+                        
+                        jpeg_b64 = base64.b64encode(jpeg_bytes).decode("utf-8")
+                        logger.info(f"[CoverGen] Converted to JPEG, final size={len(jpeg_bytes)} bytes")
+                        return jpeg_b64
+                        
+                    except ImportError:
+                        logger.warning("[CoverGen] PIL not installed, returning raw image data")
+                        return image_data
+                    except Exception as e:
+                        logger.error(f"[CoverGen] Image conversion failed: {e}")
+                        return image_data
+
+        logger.warning("[CoverGen] No image found in Gemini response parts")
+        return None
+
+    except Exception as e:
+        logger.error(f"[CoverGen] Failed to generate cover: {e}")
+        return None
+
+
+async def upload_playlist_cover(
+    playlist_id: str,
+    image_base64: str,
+    spotify_token: str,
+) -> bool:
+    """
+    Upload a cover image to a Spotify playlist.
+    
+    Args:
+        playlist_id: Spotify playlist ID
+        image_base64: Base64-encoded JPEG image (no data: prefix)
+        spotify_token: Valid Spotify access token
+    
+    Returns:
+        True on success, False on failure
+    """
+    url = f"https://api.spotify.com/v1/playlists/{playlist_id}/images"
+    
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.put(
+                url,
+                content=image_base64,
+                headers={
+                    "Authorization": f"Bearer {spotify_token}",
+                    "Content-Type": "image/jpeg",
+                },
+            )
+        
+        if resp.status_code in (200, 202):
+            logger.info(f"[CoverGen] Successfully uploaded cover for playlist {playlist_id}")
+            return True
+        else:
+            logger.error(f"[CoverGen] Spotify upload failed: {resp.status_code} - {resp.text[:200]}")
+            return False
+            
+    except Exception as e:
+        logger.error(f"[CoverGen] Upload failed: {e}")
+        return False
