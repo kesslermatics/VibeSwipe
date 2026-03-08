@@ -613,7 +613,7 @@ SPOTIFY_API_BASE = "https://api.spotify.com/v1"
 
 SWIPE_GEMINI_URL = (
     f"https://generativelanguage.googleapis.com/v1beta/models/"
-    f"gemini-3-flash-preview:generateContent?key={settings.gemini_api_key}"
+    f"gemini-3.1-pro-preview:generateContent?key={settings.gemini_api_key}"
 )
 
 import redis as _redis

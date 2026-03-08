@@ -34,7 +34,7 @@ SPOTIFY_API = "https://api.spotify.com/v1"
 
 GEMINI_URL = (
     f"https://generativelanguage.googleapis.com/v1beta/models/"
-    f"gemini-3-flash-preview:generateContent?key={settings.gemini_api_key}"
+    f"gemini-3.1-pro-preview:generateContent?key={settings.gemini_api_key}"
 )
 
 # Redis Client
@@ -288,16 +288,25 @@ async def ask_gemini_gym(inspiration_songs: list[str], recent_history: list[str]
 DO NOT include ANY of these songs. Pick DIFFERENT songs instead:
 {avoid_list}\n"""
 
-    prompt = f"""You are a music expert specializing in gym and workout playlists.
+    prompt = f"""You are a music expert creating personalized gym playlists.
 
-I will give you a list of songs that represent the user's music taste.
+I will give you a list of songs that represent the user's ACTUAL music taste.
 
-Your task: Create a killer gym/workout playlist with exactly 30 songs that:
-- Match the user's taste and style based on the inspiration songs
-- Are high-energy, motivating, and perfect for intense workouts
-- Push hard – no ballads, no slow songs, no chill vibes
-- Mix well-known bangers with some hidden gems
-- Include songs that build energy and keep the momentum going
+CRITICAL: The user's taste is DIVERSE. Analyze the genres in their inspiration songs carefully.
+If they listen to 60% Rock, 20% Pop, 20% Hip-Hop – your playlist should reflect similar proportions!
+Do NOT convert everything into one genre (like hard metal). PRESERVE their genre diversity.
+
+Your task: Create an energizing workout playlist with exactly 30 songs that:
+- MATCH the user's actual genre distribution from the inspiration songs
+- Pick energetic/upbeat songs FROM EACH GENRE the user likes (not just rock/metal)
+- For Pop → pick danceable, high-BPM pop tracks  
+- For Hip-Hop → pick hype, motivating rap tracks
+- For Rock → pick energetic rock (but NOT just metal!)
+- For Electronic → pick driving EDM/dance tracks
+- Etc. for any other genres present
+- Avoid slow ballads, but don't interpret "workout" as "must be metal"
+- Mix well-known tracks with some discoveries
+- Create variety – avoid 30 songs that sound identical
 
 DO NOT include any of the inspiration songs in your recommendations.
 {avoid_block}
@@ -311,17 +320,18 @@ Respond ONLY with valid JSON in this exact format:
 
 Rules:
 - Exactly 30 songs
-- No duplicates
-- Only high-energy workout tracks
+- No duplicates  
+- Reflect the user's genre mix, not just one style
+- Energetic tracks from EACH genre they like
 - Only output valid JSON, no markdown, no explanation
 
-Here are the user's inspiration songs:
+Here are the user's inspiration songs (analyze genres carefully):
 {song_list}"""
 
     payload = {
         "contents": [{"parts": [{"text": prompt}]}],
         "generationConfig": {
-            "temperature": 1.8,
+            "temperature": 1.0,
             "maxOutputTokens": 8192,
         },
     }
